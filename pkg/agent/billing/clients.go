@@ -69,7 +69,7 @@ func createClients(ctx context.Context, logger *zap.Logger, cfg ClientsConfig) (
 			Name:            "azureblob",
 			Base:            client,
 			BaseConfig:      c.BaseClientConfig,
-			NewBatchBuilder: jsonArrayBatch(reporting.NewGZIPBuffer),
+			NewBatchBuilder: jsonLinesBatch(reporting.NewGZIPBuffer),
 		})
 	}
 	if c := cfg.S3; c != nil {
@@ -84,7 +84,7 @@ func createClients(ctx context.Context, logger *zap.Logger, cfg ClientsConfig) (
 			Name:            "s3",
 			Base:            client,
 			BaseConfig:      c.BaseClientConfig,
-			NewBatchBuilder: jsonArrayBatch(reporting.NewGZIPBuffer),
+			NewBatchBuilder: jsonLinesBatch(reporting.NewGZIPBuffer),
 		})
 	}
 
@@ -94,6 +94,12 @@ func createClients(ctx context.Context, logger *zap.Logger, cfg ClientsConfig) (
 func jsonArrayBatch[B reporting.IOBuffer](buf func() B) func() reporting.BatchBuilder[*IncrementalEvent] {
 	return func() reporting.BatchBuilder[*IncrementalEvent] {
 		return reporting.NewJSONArrayBuilder[*IncrementalEvent](buf(), "events")
+	}
+}
+
+func jsonLinesBatch[B reporting.IOBuffer](buf func() B) func() reporting.BatchBuilder[*IncrementalEvent] {
+	return func() reporting.BatchBuilder[*IncrementalEvent] {
+		return reporting.NewJSONLinesBuilder[*IncrementalEvent](buf())
 	}
 }
 
