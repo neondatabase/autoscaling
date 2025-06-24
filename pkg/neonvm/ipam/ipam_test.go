@@ -16,7 +16,6 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	kfake "k8s.io/client-go/kubernetes/fake"
 
 	nfake "github.com/neondatabase/autoscaling/neonvm/client/clientset/versioned/fake"
 	"github.com/neondatabase/autoscaling/pkg/neonvm/ipam"
@@ -29,9 +28,8 @@ type testParams struct {
 
 func makeIPAM(t *testing.T, cfg string) *testParams {
 	client := ipam.Client{
-		KubeClient: kfake.NewSimpleClientset(),
-		VMClient:   nfake.NewSimpleClientset(),
-		NADClient:  nadfake.NewSimpleClientset(),
+		VMClient:  nfake.NewSimpleClientset(),
+		NADClient: nadfake.NewSimpleClientset(),
 	}
 	_, err := client.NADClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions("default").Create(context.Background(), &nadv1.NetworkAttachmentDefinition{
 		TypeMeta: metav1.TypeMeta{

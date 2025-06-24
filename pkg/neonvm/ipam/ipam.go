@@ -2,19 +2,21 @@ package ipam
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
 	"net/netip"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/rest"
+
+	nad "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned"
+	neonvm "github.com/neondatabase/autoscaling/neonvm/client/clientset/versioned"
 )
 
 const (
@@ -38,10 +40,90 @@ type IPAM struct {
 	managers []*Manager
 }
 
-type IPAMParams struct {
-	NadName      string
-	NadNamespace string
-	MetricsReg   prometheus.Registerer
+func New(params IPAMParams) (*IPAM, error) {
+	// get Kubernetes client config
+	cfg, err := config.GetConfig()
+	if err != nil {
+		return nil, fmt.Errorf("error building kubernetes configuration: %w", err)
+	}
+
+	// tune Kubernetes client performance
+	cfg.QPS = KubernetesClientQPS
+	cfg.Burst = KubernetesClientBurst
+
+	kClient, err := newClient(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("error creating kubernetes client: %w", err)
+	}
+	return FromClient(kClient, params)
+}
+
+type Client struct {
+	VMClient  neonvm.Interface
+	NADClient nad.Interface
+}
+
+func newClient(cfg *rest.Config) (*Client, error) {
+	vmClient, err := neonvm.NewForConfig(cfg)
+	if err != nil {
+		return nil, err
+	}
+	nadClient, err := nad.NewForConfig(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Client{
+		VMClient:  vmClient,
+		NADClient: nadClient,
+	}, nil
+}
+
+func FromClient(kClient *Client, params IPAMParams) (*IPAM, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), IpamRequestTimeout)
+	defer cancel()
+
+	// read network-attachment-definition from Kubernetes
+	nad, err := kClient.NADClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(params.NadNamespace).Get(ctx, params.NadName, metav1.GetOptions{})
+	if err != nil {
+		return nil, err
+	}
+	if len(nad.Spec.Config) == 0 {
+		return nil, fmt.Errorf("network-attachment-definition %s hasn't IPAM config section", nad.Name)
+	}
+
+	ipamConfig, err := loadFromNad(nad.Spec.Config, nad.Namespace)
+	if err != nil {
+		return nil, fmt.Errorf("network-attachment-definition IPAM config parse error: %w", err)
+	}
+	if len(ipamConfig.IPRanges) == 0 {
+		return nil, fmt.Errorf("network-attachment-definition %s has no IP ranges", nad.Name)
+	}
+
+	if ipamConfig.ManagerConfig == nil {
+		return nil, fmt.Errorf("network-attachment-definition %s has no manager config", nad.Name)
+	}
+
+	var managers []*Manager
+	for _, rangeConfig := range ipamConfig.IPRanges {
+		poolClient, err := newIPPoolClient(kClient.VMClient, &rangeConfig, ipamConfig)
+		if err != nil {
+			return nil, fmt.Errorf("error creating pool client: %w", err)
+		}
+
+		manager, err := NewManager(ctx, ipamConfig.ManagerConfig, poolClient)
+		if err != nil {
+			return nil, fmt.Errorf("error creating manager: %w", err)
+		}
+		managers = append(managers, manager)
+	}
+
+	return &IPAM{
+		Config:   *ipamConfig,
+		Client:   *kClient,
+		metrics:  NewIPAMMetrics(params.MetricsReg),
+		managers: managers,
+	}, nil
 }
 
 type ipamAction string
@@ -78,114 +160,6 @@ func (i *IPAM) ReleaseIP(ctx context.Context, vmName types.NamespacedName, ip ne
 		// We can only log the error, because method is not failable.
 		// If it ever happens - it means we have a bug.
 	}
-}
-
-// New returns a new IPAM object with ipam config and k8s/crd clients
-func New(params IPAMParams) (*IPAM, error) {
-	// get Kubernetes client config
-	cfg, err := config.GetConfig()
-	if err != nil {
-		return nil, fmt.Errorf("error building kubernetes configuration: %w", err)
-	}
-
-	// tune Kubernetes client performance
-	cfg.QPS = KubernetesClientQPS
-	cfg.Burst = KubernetesClientBurst
-
-	kClient, err := NewKubeClient(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("error creating kubernetes client: %w", err)
-	}
-	return FromClient(kClient, params)
-}
-
-func FromClient(kClient *Client, params IPAMParams) (*IPAM, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), IpamRequestTimeout)
-	defer cancel()
-
-	// read network-attachment-definition from Kubernetes
-	nad, err := kClient.NADClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(params.NadNamespace).Get(ctx, params.NadName, metav1.GetOptions{})
-	if err != nil {
-		return nil, err
-	}
-	if len(nad.Spec.Config) == 0 {
-		return nil, fmt.Errorf("network-attachment-definition %s hasn't IPAM config section", nad.Name)
-	}
-
-	ipamConfig, err := LoadFromNad(nad.Spec.Config, params.NadNamespace)
-	if err != nil {
-		return nil, fmt.Errorf("network-attachment-definition IPAM config parse error: %w", err)
-	}
-	if len(ipamConfig.IPRanges) == 0 {
-		return nil, fmt.Errorf("network-attachment-definition %s has no IP ranges", nad.Name)
-	}
-
-	if ipamConfig.ManagerConfig == nil {
-		return nil, fmt.Errorf("network-attachment-definition %s has no manager config", nad.Name)
-	}
-
-	var managers []*Manager
-	for _, rangeConfig := range ipamConfig.IPRanges {
-		poolClient, err := newIPPoolClient(kClient.VMClient, &rangeConfig, ipamConfig)
-		if err != nil {
-			return nil, fmt.Errorf("error creating pool client: %w", err)
-		}
-
-		manager, err := NewManager(ctx, ipamConfig.ManagerConfig, poolClient)
-		if err != nil {
-			return nil, fmt.Errorf("error creating manager: %w", err)
-		}
-		managers = append(managers, manager)
-	}
-
-	return &IPAM{
-		Config:   *ipamConfig,
-		Client:   *kClient,
-		metrics:  NewIPAMMetrics(params.MetricsReg),
-		managers: managers,
-	}, nil
-}
-
-// Load Network Attachment Definition and parse config to fill IPAM config
-func LoadFromNad(nadConfig string, nadNamespace string) (*IPAMConfig, error) {
-	var n Nad
-	if err := json.Unmarshal([]byte(nadConfig), &n); err != nil {
-		return nil, fmt.Errorf("json parsing error: %w", err)
-	}
-
-	if n.IPAM == nil {
-		return nil, fmt.Errorf("missing 'ipam' key")
-	}
-
-	// check IP ranges
-	for idx, rangeConfig := range n.IPAM.IPRanges {
-		firstip, ipNet, err := net.ParseCIDR(rangeConfig.Range)
-		if err != nil {
-			return nil, fmt.Errorf("invalid CIDR %s: %w", rangeConfig.Range, err)
-		}
-		rangeConfig.Range = ipNet.String()
-		if rangeConfig.RangeStart == nil {
-			firstip = net.ParseIP(firstip.Mask(ipNet.Mask).String()) // get real first IP from cidr
-			rangeConfig.RangeStart = firstip
-		}
-		if rangeConfig.RangeStart != nil && !ipNet.Contains(rangeConfig.RangeStart) {
-			return nil, fmt.Errorf("range_start IP %s not in IP Range %s",
-				rangeConfig.RangeStart.String(),
-				rangeConfig.Range)
-		}
-		if rangeConfig.RangeEnd != nil && !ipNet.Contains(rangeConfig.RangeEnd) {
-			return nil, fmt.Errorf("range_end IP %s not in IP Range %s",
-				rangeConfig.RangeEnd.String(),
-				rangeConfig.Range)
-		}
-
-		n.IPAM.IPRanges[idx] = rangeConfig
-	}
-
-	// set network namespace
-	n.IPAM.NetworkNamespace = nadNamespace
-
-	return n.IPAM, nil
 }
 
 func (i *IPAM) runIPAMMetered(ctx context.Context, action ipamAction, cb func(*Manager) error) error {
