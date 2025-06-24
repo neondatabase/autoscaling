@@ -14,12 +14,6 @@ type IPAMMetrics struct {
 }
 
 const (
-	IPAMAcquire = "acquire"
-	IPAMRelease = "release"
-	IPAMCleanup = "cleanup"
-)
-
-const (
 	IPAMSuccess = "success"
 	IPAMFailure = "failure"
 	IPAMPanic   = "panic"
