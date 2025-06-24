@@ -3,7 +3,6 @@ package scalingevents
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/lithammer/shortuuid"
@@ -82,17 +81,13 @@ func jsonLinesBatch[B reporting.IOBuffer](buf func() B) func() reporting.BatchBu
 // uses for its reporting.
 func newBlobStorageKeyGenerator(prefix string) func() string {
 	return func() string {
-		now := time.Now()
+		now := time.Now().UTC()
 		id := shortuuid.New()
 
-		if prefix != "" {
-			prefix = strings.TrimRight(prefix, "/") + "/"
-		}
-
-		return fmt.Sprintf("%syear=%d/month=%02d/day=%02d/hour=%02d/%s_%s.ndjson.gz",
+		return fmt.Sprintf(
+			"%s/%d/%02d/%02d/%02d/events_%s.ndjson.gz",
 			prefix,
 			now.Year(), now.Month(), now.Day(), now.Hour(),
-			now.Format("15:04:05Z"),
 			id,
 		)
 	}
