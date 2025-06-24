@@ -23,5 +23,6 @@ type IPAMConfig struct {
 	IPRanges         []RangeConfiguration `json:"ipRanges"`
 	DNS              cnitypes.DNS         `json:"dns"`
 	NetworkNamespace string
-	NetworkName      string `json:"network_name,omitempty"`
+	NetworkName      string             `json:"network_name,omitempty"`
+	ManagerConfig    *IPAMManagerConfig `json:"manager_config,omitempty"`
 }

@@ -152,17 +152,12 @@ func main() {
 		NadName:      rc.NADConfig.IPAMName,
 		NadNamespace: rc.NADConfig.IPAMNamespace,
 
-		// Let's not have more than a quarter of reconcilliation workers stuck
-		// at IPAM mutex.
-		ConcurrencyLimit: max(1, cli.concurrencyLimit/4),
-
 		MetricsReg: metrics.Registry,
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to create ipam")
 		panic(err)
 	}
-	defer ipam.Close()
 
 	vmReconciler := &controllers.VMReconciler{
 		Client:  mgr.GetClient(),
