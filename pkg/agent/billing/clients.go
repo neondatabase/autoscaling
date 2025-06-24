@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/lithammer/shortuuid"
@@ -105,7 +106,7 @@ func jsonLinesBatch[B reporting.IOBuffer](buf func() B) func() reporting.BatchBu
 
 // Returns a function to generate keys for the placement of billing events data into blob storage.
 //
-// Example: prefixInContainer/year=2021/month=01/day=26/hh:mm:ssZ_{uuid}.ndjson.gz
+// Example: prefixInContainer/year=2021/month=01/day=26/hour=15/hh:mm:ssZ_{uuid}.ndjson.gz
 //
 // NOTE: This key format is different from the one we use for scaling events, but similar to the one
 // proxy/storage use.
@@ -114,9 +115,13 @@ func newBlobStorageKeyGenerator(prefix string) func() string {
 		now := time.Now()
 		id := shortuuid.New()
 
-		return fmt.Sprintf("%s/year=%d/month=%02d/day=%02d/%s_%s.ndjson.gz",
+		if prefix != "" {
+			prefix = strings.TrimRight(prefix, "/") + "/"
+		}
+
+		return fmt.Sprintf("%syear=%d/month=%02d/day=%02d/hour=%02d/%s_%s.ndjson.gz",
 			prefix,
-			now.Year(), now.Month(), now.Day(),
+			now.Year(), now.Month(), now.Day(), now.Hour(),
 			now.Format("15:04:05Z"),
 			id,
 		)
