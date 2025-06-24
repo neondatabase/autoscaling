@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
+	"sync"
 	"time"
 
 	nad "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned"
@@ -15,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/rest"
 
+	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	neonvm "github.com/neondatabase/autoscaling/neonvm/client/clientset/versioned"
 )
 
@@ -199,4 +202,76 @@ func (i *IPAM) runIPAM(ctx context.Context, action ipamAction, cb func(*Manager)
 		errorList = append(errorList, err)
 	}
 	return errors.Join(errorList...)
+}
+
+func (i *IPAM) getVMs(ctx context.Context) ([]vmv1.VirtualMachine, error) {
+	vmList, err := i.Client.VMClient.NeonvmV1().VirtualMachines("default").List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	return vmList.Items, nil
+}
+
+func (i *IPAM) doSetActive(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, IpamRequestTimeout)
+	defer cancel()
+
+	// Do SetActive in main loop
+	vmList, err := i.getVMs(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get VMs: %w", err)
+	}
+
+	active := make(map[netip.Addr]VMID)
+	for _, vm := range vmList {
+		if len(vm.Status.ExtraNetIP) == 0 {
+			continue
+		}
+		ip, err := netip.ParseAddr(vm.Status.ExtraNetIP)
+		if err != nil {
+			return fmt.Errorf("failed to parse IP %s: %w", vm.Status.ExtraNetIP, err)
+		}
+
+		active[ip] = VMID{
+			Namespace: vm.Namespace,
+			Name:      vm.Name,
+		}
+	}
+
+	for _, manager := range i.managers {
+		manager.SetActive(active)
+	}
+	return nil
+}
+
+func (i *IPAM) Run(ctx context.Context) {
+	log := log.FromContext(ctx)
+	wg := sync.WaitGroup{}
+	defer wg.Wait()
+
+	for _, manager := range i.managers {
+		wg.Add(1)
+		go func() {
+			manager.Run(ctx)
+			wg.Done()
+		}()
+	}
+	// Do SetActive in main loop
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		err := i.doSetActive(ctx)
+		if err == nil {
+			break
+		}
+		log.Error(err, "failed to set active, retrying in 1 second")
+		time.Sleep(1 * time.Second)
+	}
+}
+
+// Start is the same as Run, to satisfy the Runnable interface
+func (i *IPAM) Start(ctx context.Context) error {
+	i.Run(ctx)
+	return nil
 }

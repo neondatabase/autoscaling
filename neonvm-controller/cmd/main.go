@@ -158,6 +158,10 @@ func main() {
 		setupLog.Error(err, "unable to create ipam")
 		panic(err)
 	}
+	if err := mgr.Add(ipam); err != nil {
+		setupLog.Error(err, "unable to add ipam")
+		panic(err)
+	}
 
 	vmReconciler := &controllers.VMReconciler{
 		Client:  mgr.GetClient(),
