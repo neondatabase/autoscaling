@@ -546,7 +546,7 @@ k3d-load: k3d # Push docker images to the k3d cluster.
 ##@ Example VM images
 
 .PHONY: vm-examples
-examples: vm-postgres pg16-disk-test ## Build example VM images
+vm-examples: vm-postgres pg16-disk-test ## Build example VM images
 
 .PHONY: vm-postgres
 vm-postgres: docker-build-vm-postgres load-vm-postgres
@@ -556,13 +556,16 @@ pg16-disk-test: docker-build-pg16-disk-test load-pg16-disk-test
 
 ##@ End-to-End tests
 
-.PHONE: e2e-tools
+.PHONY: e2e-tools
 e2e-tools: k3d kind kubectl kuttl python-init ## Donwnload tools for e2e tests locally if necessary.
 
-.PHONE: e2e
+.PHONY: e2e
 e2e: check-local-context e2e-tools ## Run e2e kuttl tests
 	$(KUTTL) test --config tests/e2e/kuttl-test.yaml $(if $(CI),--skip-delete)
 	rm -f kubeconfig
+
+.PHONY: run-e2e
+run-e2e: docker-build deploy vm-examples e2e ## Helper target to do all steps to run e2e tests locally
 
 ##@ Local kind cluster
 
