@@ -26,6 +26,7 @@ type cliFlags struct {
 	failingRefreshInterval  time.Duration
 	atMostOnePod            bool
 	useVirtioConsole        bool
+	forceRetryFailed        bool
 }
 
 type leaderElectionCliFlags struct {
@@ -79,7 +80,8 @@ func getCli() cliFlags {
 			"Otherwise, the outdated pod might be left to terminate, while the new one is already running.")
 	useVirtioConsole := flag.Bool("use-virtio-console", false,
 		"If true, the controller will set up the runner to use virtio console instead of serial console.")
-
+	forceRetryFailed := flag.Bool("force-retry-failed", false,
+		"If true, the controller will retry failed reconciliations.")
 	flag.Parse()
 
 	return cliFlags{
@@ -105,6 +107,7 @@ func getCli() cliFlags {
 		failingRefreshInterval:  *failingRefreshInterval,
 		atMostOnePod:            *atMostOnePod,
 		useVirtioConsole:        *useVirtioConsole,
+		forceRetryFailed:        *forceRetryFailed,
 	}
 }
 
