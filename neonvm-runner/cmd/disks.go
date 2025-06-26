@@ -185,12 +185,17 @@ func createISO9660runtime(
 	}
 	if enableSSH {
 		mounts = append(mounts, "/neonvm/bin/mkdir -p /mnt/ssh")
-		mounts = append(mounts, "/neonvm/bin/mount  -t iso9660 -o ro,mode=0644 $(/neonvm/bin/blkid -L ssh-authorized-keys) /mnt/ssh")
+		mounts = append(mounts, "/neonvm/bin/mount -t iso9660 -o ro,mode=0644 $(/neonvm/bin/blkid -L ssh-authorized-keys) /mnt/ssh")
 	}
 
 	if swapSize != nil {
 		mounts = append(mounts, fmt.Sprintf("/neonvm/bin/sh /neonvm/runtime/resize-swap-internal.sh %d", swapSize.Value()))
 	}
+
+	// Add tools.
+	mounts = append(mounts, "/neonvm/bin/mkdir -p /mnt/tools")
+	mounts = append(mounts, "/neonvm/bin/mount -t iso9660 -o ro,exec $(/neonvm/bin/blkid -L vm-tools) /mnt/tools")
+	mounts = append(mounts, "/neonvm/bin/ln -s /mnt/tools/* /usr/local/bin/")
 
 	if len(disks) != 0 {
 		for _, disk := range disks {
