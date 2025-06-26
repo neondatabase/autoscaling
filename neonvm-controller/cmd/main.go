@@ -40,7 +40,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
-
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
@@ -159,7 +158,10 @@ func main() {
 		setupLog.Error(err, "unable to create ipam")
 		panic(err)
 	}
-	mgr.Add(ipam)
+	if err := mgr.Add(ipam); err != nil {
+		setupLog.Error(err, "unable to add ipam")
+		panic(err)
+	}
 
 	vmReconciler := &controllers.VMReconciler{
 		Client:  mgr.GetClient(),
