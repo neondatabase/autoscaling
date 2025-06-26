@@ -24,7 +24,8 @@ const (
 	rootDiskPath    = "/vm/images/rootdisk.qcow2"
 	runtimeDiskPath = "/vm/images/runtime.iso"
 	mountedDiskPath = "/vm/images"
-	toolsPath       = "/vm/tools"
+
+	toolsDiskPath = "/vm/tools.iso"
 
 	sshAuthorizedKeysDiskPath   = "/vm/images/ssh-authorized-keys.iso"
 	sshAuthorizedKeysMountPoint = "/vm/ssh"
@@ -47,10 +48,10 @@ func setupVMDisks(
 
 	{
 		name := "vm-tools"
-		if err := createISO9660FromPath(logger, name, toolsPath, cfg.toolsPath); err != nil {
+		if err := createISO9660FromPath(logger, name, toolsDiskPath, cfg.toolsPath); err != nil {
 			return nil, fmt.Errorf("Failed to create ISO9660 image: %w", err)
 		}
-		qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=cdrom,cache=none", name, toolsPath))
+		qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=cdrom,cache=none", name, toolsDiskPath))
 	}
 
 	if enableSSH {
