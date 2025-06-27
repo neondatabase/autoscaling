@@ -52,6 +52,7 @@ func main() {
 		NadNamespace:     *nadNs,
 		ConcurrencyLimit: 1,
 		MetricsReg:       prometheus.NewRegistry(),
+		Clock:            time.Now,
 	})
 	if err != nil {
 		logger.Error(err, "failed to create IPAM")

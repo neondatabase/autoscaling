@@ -5,14 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"net"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	whereaboutsallocate "github.com/k8snetworkplumbingwg/whereabouts/pkg/allocate"
-	whereaboutstypes "github.com/k8snetworkplumbingwg/whereabouts/pkg/types"
 	"github.com/prometheus/client_golang/prometheus"
 	"golang.org/x/sync/semaphore"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
@@ -37,22 +36,18 @@ const (
 	// RequestTimeout for IPAM queries
 	IpamRequestTimeout = 10 * time.Second
 
-	// DatastoreRetries defines how many retries are attempted when reading/updating the IP Pool
-	DatastoreRetries      = 5
-	DatastoreRetriesDelay = 100 * time.Millisecond
+	// QuarantinePeriod is the period that we quarantine IPs for.
+	QuarantinePeriod = 300 * time.Second
 )
 
 var ErrAgain = errors.New("IPAM concurrency limit reached. Try again later.")
-
-type Temporary interface {
-	Temporary() bool
-}
 
 type IPAM struct {
 	Client
 	Config  IPAMConfig
 	metrics *IPAMMetrics
 
+	clock              func() time.Time
 	mu                 sync.Mutex
 	concurrencyLimiter *semaphore.Weighted
 }
@@ -62,10 +57,11 @@ type IPAMParams struct {
 	NadNamespace     string
 	ConcurrencyLimit int
 	MetricsReg       prometheus.Registerer
+	Clock            func() time.Time
 }
 
 func (i *IPAM) AcquireIP(ctx context.Context, vmName types.NamespacedName) (net.IPNet, error) {
-	ip, err := i.runIPAMWithMetrics(ctx, makeAcquireAction(ctx, vmName), IPAMAcquire)
+	ip, err := i.runIPAMWithMetrics(ctx, IPAMAcquire, vmName.String())
 	if err != nil {
 		return net.IPNet{}, fmt.Errorf("failed to acquire IP: %w", err)
 	}
@@ -73,7 +69,7 @@ func (i *IPAM) AcquireIP(ctx context.Context, vmName types.NamespacedName) (net.
 }
 
 func (i *IPAM) ReleaseIP(ctx context.Context, vmName types.NamespacedName) (net.IPNet, error) {
-	ip, err := i.runIPAMWithMetrics(ctx, makeReleaseAction(ctx, vmName), IPAMRelease)
+	ip, err := i.runIPAMWithMetrics(ctx, IPAMRelease, vmName.String())
 	if err != nil {
 		return net.IPNet{}, fmt.Errorf("failed to release IP: %w", err)
 	}
@@ -126,7 +122,26 @@ func NewWithClient(kClient *Client, params IPAMParams) (*IPAM, error) {
 		metrics:            NewIPAMMetrics(params.MetricsReg),
 		mu:                 sync.Mutex{},
 		concurrencyLimiter: semaphore.NewWeighted(int64(params.ConcurrencyLimit)),
+		clock:              params.Clock,
 	}, nil
+}
+
+func lastIP(ipNet *net.IPNet) net.IP {
+	ip := ipNet.IP
+	mask := ipNet.Mask
+	if ip.To4() != nil {
+		ip = ip.To4()
+		mask = net.IPMask(net.IP(mask).To4())
+
+	}
+	lastIP := make(net.IP, len(ip))
+
+	// ~mask has ones in places which would be variable in the subnet
+	// so we OR it with the start IP to get the end of the range
+	for i := range ip {
+		lastIP[i] = ip[i] | ^mask[i]
+	}
+	return lastIP
 }
 
 // Load Network Attachment Definition and parse config to fill IPAM config
@@ -140,34 +155,28 @@ func LoadFromNad(nadConfig string, nadNamespace string) (*IPAMConfig, error) {
 		return nil, fmt.Errorf("missing 'ipam' key")
 	}
 
-	// process old-style Range to Ranges array
-	if n.IPAM.Range != "" {
-		oldRange := RangeConfiguration{
-			OmitRanges: n.IPAM.OmitRanges,
-			Range:      n.IPAM.Range,
-			RangeStart: n.IPAM.RangeStart,
-			RangeEnd:   n.IPAM.RangeEnd,
-		}
-		n.IPAM.IPRanges = append([]RangeConfiguration{oldRange}, n.IPAM.IPRanges...)
-	}
-
 	// check IP ranges
 	for idx, rangeConfig := range n.IPAM.IPRanges {
-		firstip, ipNet, err := net.ParseCIDR(rangeConfig.Range)
+		_, ipNet, err := net.ParseCIDR(rangeConfig.Range)
 		if err != nil {
 			return nil, fmt.Errorf("invalid CIDR %s: %w", rangeConfig.Range, err)
 		}
 		rangeConfig.Range = ipNet.String()
-		if rangeConfig.RangeStart == nil {
-			firstip = net.ParseIP(firstip.Mask(ipNet.Mask).String()) // get real first IP from cidr
-			rangeConfig.RangeStart = firstip
+
+		if len(rangeConfig.RangeStart) == 0 {
+			rangeConfig.RangeStart = make([]byte, len(ipNet.IP))
+			copy(rangeConfig.RangeStart, ipNet.IP)
 		}
-		if rangeConfig.RangeStart != nil && !ipNet.Contains(rangeConfig.RangeStart) {
+		if !ipNet.Contains(rangeConfig.RangeStart) {
 			return nil, fmt.Errorf("range_start IP %s not in IP Range %s",
 				rangeConfig.RangeStart.String(),
 				rangeConfig.Range)
 		}
-		if rangeConfig.RangeEnd != nil && !ipNet.Contains(rangeConfig.RangeEnd) {
+
+		if len(rangeConfig.RangeEnd) == 0 {
+			rangeConfig.RangeEnd = lastIP(ipNet)
+		}
+		if !ipNet.Contains(rangeConfig.RangeEnd) {
 			return nil, fmt.Errorf("range_end IP %s not in IP Range %s",
 				rangeConfig.RangeEnd.String(),
 				rangeConfig.Range)
@@ -176,32 +185,18 @@ func LoadFromNad(nadConfig string, nadNamespace string) (*IPAMConfig, error) {
 		n.IPAM.IPRanges[idx] = rangeConfig
 	}
 
-	// delete old style settings
-	n.IPAM.OmitRanges = nil
-	n.IPAM.Range = ""
-	n.IPAM.RangeStart = nil
-	n.IPAM.RangeEnd = nil
-
-	// check Excluded IP ranges
-	for idx := range n.IPAM.OmitRanges {
-		_, _, err := net.ParseCIDR(n.IPAM.OmitRanges[idx])
-		if err != nil {
-			return nil, fmt.Errorf("invalid exclude CIDR %s: %w", n.IPAM.OmitRanges[idx], err)
-		}
-	}
-
 	// set network namespace
 	n.IPAM.NetworkNamespace = nadNamespace
 
 	return n.IPAM, nil
 }
 
-func (i *IPAM) runIPAMWithMetrics(ctx context.Context, action ipamAction, actionName string) (net.IPNet, error) {
-	timer := i.metrics.StartTimer(actionName)
+func (i *IPAM) runIPAMWithMetrics(ctx context.Context, action IPAMAction, vmName string) (net.IPNet, error) {
+	timer := i.metrics.StartTimer(string(action))
 	// This is if we get a panic
 	defer timer.Finish(IPAMPanic)
 
-	ip, err := i.runIPAM(ctx, action)
+	ip, err := i.runIPAM(ctx, action, vmName)
 	if err != nil {
 		timer.Finish(IPAMFailure)
 	} else {
@@ -211,7 +206,7 @@ func (i *IPAM) runIPAMWithMetrics(ctx context.Context, action ipamAction, action
 }
 
 // Performing IPAM actions
-func (i *IPAM) runIPAM(ctx context.Context, action ipamAction) (net.IPNet, error) {
+func (i *IPAM) runIPAM(ctx context.Context, action IPAMAction, vmName string) (net.IPNet, error) {
 	var err error
 	var ip net.IPNet
 	log := log.FromContext(ctx)
@@ -229,6 +224,13 @@ func (i *IPAM) runIPAM(ctx context.Context, action ipamAction) (net.IPNet, error
 	i.mu.Lock()
 	defer i.mu.Unlock()
 
+	// Now that we have the lock, maybe the context was canceled.
+	select {
+	case <-ctx.Done():
+		return net.IPNet{}, ctx.Err()
+	default:
+	}
+
 	ctx, ctxCancel := context.WithTimeout(ctx, IpamRequestTimeout)
 	defer ctxCancel()
 
@@ -236,7 +238,7 @@ func (i *IPAM) runIPAM(ctx context.Context, action ipamAction) (net.IPNet, error
 	for _, ipRange := range i.Config.IPRanges {
 		// retry loop used to retry CRUD operations against Kubernetes
 		// if we meet some issue then just do another attepmt
-		ip, err = i.runIPAMRange(ctx, ipRange, action)
+		ip, err = i.runIPAMRange(ctx, ipRange, action, vmName)
 		// break ipRanges loop if ip was acquired/released
 		if err == nil {
 			return ip, nil
@@ -246,47 +248,34 @@ func (i *IPAM) runIPAM(ctx context.Context, action ipamAction) (net.IPNet, error
 	return net.IPNet{}, err
 }
 
-func (i *IPAM) runIPAMRange(ctx context.Context, ipRange RangeConfiguration, action ipamAction) (net.IPNet, error) {
-	var ip net.IPNet
-	for retry := 0; retry < DatastoreRetries; retry++ {
-		select {
-		case <-ctx.Done():
-			return net.IPNet{}, ctx.Err()
-		default:
-			// live in retry loop until context not cancelled
-		}
-
-		// read IPPool from ipppols.vm.neon.tech custom resource
-		pool, err := i.getNeonvmIPPool(ctx, ipRange.Range)
-		if err != nil {
-			if e, ok := err.(Temporary); ok && e.Temporary() {
-				// retry attempt to read IPPool
-				time.Sleep(DatastoreRetriesDelay)
-				continue
-			}
-			return net.IPNet{}, fmt.Errorf("error reading IP pool: %w", err)
-		}
-
-		currentReservation := pool.Allocations(ctx)
-		var newReservation []whereaboutstypes.IPReservation
-		ip, newReservation, err = action(ipRange, currentReservation)
-		if err != nil {
-			return net.IPNet{}, err
-		}
-
-		// update IPPool with newReservation
-		err = pool.Update(ctx, newReservation)
-		if err != nil {
-			if e, ok := err.(Temporary); ok && e.Temporary() {
-				// retry attempt to update IPPool
-				time.Sleep(DatastoreRetriesDelay)
-				continue
-			}
-			return net.IPNet{}, fmt.Errorf("error updating IP pool: %w", err)
-		}
-		return ip, nil
+func (i *IPAM) runIPAMRange(ctx context.Context, ipRange RangeConfiguration, action IPAMAction, vmName string) (net.IPNet, error) {
+	// read IPPool from ipppols.vm.neon.tech custom resource
+	pool, err := i.getNeonvmIPPool(ctx, ipRange)
+	if err != nil {
+		return net.IPNet{}, fmt.Errorf("error reading IP pool: %w", err)
 	}
-	return ip, errors.New("IPAMretries limit reached")
+
+	var ip net.IPNet
+
+	switch action {
+	case IPAMAcquire:
+		ip, err = pool.allocate(vmName)
+		if err != nil {
+			return net.IPNet{}, fmt.Errorf("error allocating IP: %w", err)
+		}
+	case IPAMRelease:
+		ip, err = pool.release(vmName)
+		if err != nil {
+			return net.IPNet{}, fmt.Errorf("error releasing IP: %w", err)
+		}
+	}
+
+	err = pool.Commit(ctx)
+	if err != nil {
+		return net.IPNet{}, fmt.Errorf("error updating IP pool: %w", err)
+	}
+	i.metrics.PoolChanged(pool.pool)
+	return ip, nil
 }
 
 // Status do List() request to check NeonVM client connectivity
@@ -304,28 +293,139 @@ func (i *IPAM) Close() error {
 type NeonvmIPPool struct {
 	vmClient neonvm.Interface
 	pool     *vmv1.IPPool
-	firstip  net.IP
+	ipRange  RangeConfiguration
+	ipNet    *net.IPNet
+
+	clock func() time.Time
 }
 
-// Allocations returns the initially retrieved set of allocations for this pool
-func (p *NeonvmIPPool) Allocations(ctx context.Context) []whereaboutstypes.IPReservation {
-	return toIPReservation(ctx, p.pool.Spec.Allocations, p.firstip)
+func (p *NeonvmIPPool) allocate(vmName string) (net.IPNet, error) {
+	p.advanceQuarantine()
+
+	offset := p.find(vmName)
+	if offset != "" {
+		return p.offsetStringFormat(offset)
+	}
+
+	// Note that we use p.ipRange.RangeStart rather than p.baseIP,
+	startOffset := p.offsetParse(p.ipRange.RangeStart)
+	endOffset := p.offsetParse(p.ipRange.RangeEnd)
+
+	for offset := startOffset; offset <= endOffset; offset++ {
+		offsetStr := fmt.Sprintf("%d", offset)
+		if _, ok := p.pool.Spec.Allocations[offsetStr]; ok {
+			continue
+		}
+		p.pool.Spec.Allocations[offsetStr] = vmv1.IPAllocation{
+			OwnerID: vmName,
+		}
+
+		return p.offsetFormat(offset), nil
+	}
+
+	return net.IPNet{}, fmt.Errorf("no free IP in the pool: %s", p.ipRange.Range)
+}
+
+func (p *NeonvmIPPool) find(vmName string) string {
+	for offset, value := range p.pool.Spec.Allocations {
+		if value.OwnerID == vmName {
+			return offset
+		}
+	}
+	return ""
+}
+
+func ipSub(ip1, ip2 net.IP) uint64 {
+	b1 := big.NewInt(0).SetBytes(ip1.To16())
+	b2 := big.NewInt(0).SetBytes(ip2.To16())
+	var result big.Int
+	result.Sub(b1, b2)
+	return result.Uint64()
+}
+
+func ipAdd(ip net.IP, offset uint64) net.IP {
+	b1 := big.NewInt(0).SetBytes(ip.To16())
+	b2 := big.NewInt(0).SetUint64(offset)
+	var resultInt big.Int
+	resultInt.Add(b1, b2)
+	result := make(net.IP, 16)
+	resultInt.FillBytes(result)
+	return result
+}
+
+func (p *NeonvmIPPool) offsetParse(ip net.IP) uint64 {
+	return ipSub(ip, p.ipNet.IP)
+}
+
+func (p *NeonvmIPPool) offsetStringFormat(offset string) (net.IPNet, error) {
+	offsetInt, err := strconv.ParseUint(offset, 10, 64)
+	if err != nil {
+		return net.IPNet{}, err
+	}
+	return p.offsetFormat(offsetInt), nil
+}
+
+func (p *NeonvmIPPool) offsetFormat(offset uint64) net.IPNet {
+	return net.IPNet{
+		IP:   ipAdd(p.ipNet.IP, offset),
+		Mask: p.ipNet.Mask,
+	}
+}
+
+func (p *NeonvmIPPool) release(vmName string) (net.IPNet, error) {
+	offset := p.find(vmName)
+	if offset == "" {
+		// IP was already freed
+		return net.IPNet{
+			IP:   nil,
+			Mask: nil,
+		}, nil
+	}
+	p.pool.Spec.Allocations[offset] = vmv1.IPAllocation{
+		OwnerID: "quarantined",
+	}
+	p.pool.Spec.QuarantinedOffsetsPending = append(p.pool.Spec.QuarantinedOffsetsPending, offset)
+	p.advanceQuarantine()
+	return p.offsetStringFormat(offset)
+}
+
+func (p *NeonvmIPPool) advanceQuarantine() {
+	now := p.clock().UTC()
+	if p.pool.Spec.QuarantineStartTime.IsZero() {
+		p.pool.Spec.QuarantineStartTime = metav1.NewTime(now)
+	}
+	if now.Sub(p.pool.Spec.QuarantineStartTime.Time) < QuarantinePeriod {
+		return
+	}
+
+	// Clear QuarantinedOffsets - for them quarantine is over
+	for _, offset := range p.pool.Spec.QuarantinedOffsets {
+		delete(p.pool.Spec.Allocations, offset)
+	}
+
+	// Start new quarantine period
+	p.pool.Spec.QuarantinedOffsets = p.pool.Spec.QuarantinedOffsetsPending
+	p.pool.Spec.QuarantinedOffsetsPending = []string{}
+	p.pool.Spec.QuarantineStartTime = metav1.NewTime(now)
 }
 
 // getNeonvmIPPool returns a NeonVM IPPool for the given IP range
-func (i *IPAM) getNeonvmIPPool(ctx context.Context, ipRange string) (*NeonvmIPPool, error) {
+func (i *IPAM) getNeonvmIPPool(ctx context.Context, ipRange RangeConfiguration) (*NeonvmIPPool, error) {
 	// for IP range 10.11.22.0/24 poll name will be
 	// "10.11.22.0-24" if no network name in ipam spec, or
 	// "samplenet-10.11.22.0-24" if nametwork name is `samplenet`
 	var poolName string
 	if i.Config.NetworkName == UnnamedNetwork {
-		poolName = strings.ReplaceAll(ipRange, "/", "-")
+		poolName = strings.ReplaceAll(ipRange.Range, "/", "-")
 	} else {
-		poolName = fmt.Sprintf("%s-%s", i.Config.NetworkName, strings.ReplaceAll(ipRange, "/", "-"))
+		poolName = fmt.Sprintf("%s-%s", i.Config.NetworkName, strings.ReplaceAll(ipRange.Range, "/", "-"))
 	}
 
 	pool, err := i.VMClient.NeonvmV1().IPPools(i.Config.NetworkNamespace).Get(ctx, poolName, metav1.GetOptions{})
-	if err != nil && apierrors.IsNotFound(err) {
+	if err != nil {
+		if !apierrors.IsNotFound(err) {
+			return nil, fmt.Errorf("error getting IP pool: %w", err)
+		}
 		// pool does not exist, create it
 		newPool := &vmv1.IPPool{
 			ObjectMeta: metav1.ObjectMeta{
@@ -333,78 +433,36 @@ func (i *IPAM) getNeonvmIPPool(ctx context.Context, ipRange string) (*NeonvmIPPo
 				Namespace: i.Config.NetworkNamespace,
 			},
 			Spec: vmv1.IPPoolSpec{
-				Range:       ipRange,
-				Allocations: make(map[string]vmv1.IPAllocation),
+				Range:                     ipRange.Range,
+				Allocations:               make(map[string]vmv1.IPAllocation),
+				QuarantinedOffsets:        nil,
+				QuarantinedOffsetsPending: nil,
+				QuarantineStartTime:       metav1.NewTime(i.clock().UTC()),
 			},
 		}
-		_, err = i.VMClient.NeonvmV1().IPPools(i.Config.NetworkNamespace).Create(ctx, newPool, metav1.CreateOptions{})
-		if err != nil && apierrors.IsAlreadyExists(err) {
-			// the pool was just created -- allow retry
-			return nil, &temporaryError{err}
-		} else if err != nil {
-			return nil, err
+		ipPool, err := i.VMClient.NeonvmV1().IPPools(i.Config.NetworkNamespace).Create(ctx, newPool, metav1.CreateOptions{})
+		if err != nil {
+			return nil, fmt.Errorf("error creating IP pool: %w", err)
 		}
-		// if the pool was created for the first time, trigger another retry of the allocation loop
-		return nil, &temporaryError{errors.New("NeonvmIPPool was initialized")}
-	} else if err != nil {
-		return nil, err
+		pool = ipPool
 	}
 
 	// get first IP in the pool
-	ip, _, err := net.ParseCIDR(pool.Spec.Range)
+	_, ipNet, err := net.ParseCIDR(pool.Spec.Range)
 	if err != nil {
 		return nil, err
 	}
 
 	return &NeonvmIPPool{
+		clock:    i.clock,
 		vmClient: i.Client.VMClient,
 		pool:     pool,
-		firstip:  ip,
+		ipRange:  ipRange,
+		ipNet:    ipNet,
 	}, nil
 }
 
-// Update NeonvmIPPool with new IP reservation
-func (p *NeonvmIPPool) Update(ctx context.Context, reservation []whereaboutstypes.IPReservation) error {
-	p.pool.Spec.Allocations = toAllocations(reservation, p.firstip)
+func (p *NeonvmIPPool) Commit(ctx context.Context) error {
 	_, err := p.vmClient.NeonvmV1().IPPools(p.pool.Namespace).Update(ctx, p.pool, metav1.UpdateOptions{})
-	if err != nil {
-		if apierrors.IsConflict(err) {
-			return &temporaryError{err}
-		}
-		return err
-	}
-	return nil
-}
-
-// taken from whereabouts code as it not exported
-func toIPReservation(ctx context.Context, allocations map[string]vmv1.IPAllocation, firstip net.IP) []whereaboutstypes.IPReservation {
-	log := log.FromContext(ctx)
-	reservelist := []whereaboutstypes.IPReservation{}
-	for offset, a := range allocations {
-		numOffset, err := strconv.ParseInt(offset, 10, 64)
-		if err != nil {
-			// allocations that are invalid int64s should be ignored
-			// toAllocationMap should be the only writer of offsets, via `fmt.Sprintf("%d", ...)``
-			log.Error(err, "error decoding ip offset")
-			continue
-		}
-		ip := whereaboutsallocate.IPAddOffset(firstip, uint64(numOffset))
-		reservelist = append(reservelist, whereaboutstypes.IPReservation{
-			IP:          ip,
-			ContainerID: a.ContainerID,
-			PodRef:      a.PodRef,
-			IsAllocated: false,
-		})
-	}
-	return reservelist
-}
-
-// taken from whereabouts code as it not exported
-func toAllocations(reservelist []whereaboutstypes.IPReservation, firstip net.IP) map[string]vmv1.IPAllocation {
-	allocations := make(map[string]vmv1.IPAllocation)
-	for _, r := range reservelist {
-		index := whereaboutsallocate.IPGetOffset(r.IP, firstip)
-		allocations[fmt.Sprintf("%d", index)] = vmv1.IPAllocation{ContainerID: r.ContainerID, PodRef: r.PodRef}
-	}
-	return allocations
+	return err
 }
