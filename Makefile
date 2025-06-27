@@ -21,13 +21,82 @@ GOOS ?= $(shell go env GOOS)
 # Any other supported by linux kernel architecture could be added by introducing new build step into neonvm/hack/kernel/Dockerfile
 UNAME_ARCH := $(shell uname -m)
 ifeq ($(UNAME_ARCH),x86_64)
-    TARGET_ARCH ?= amd64
+    HOST_ARCH ?= amd64
 else ifeq ($(UNAME_ARCH),aarch64)
-    TARGET_ARCH ?= arm64
+    HOST_ARCH ?= arm64
 else ifeq ($(UNAME_ARCH),arm64)
-    TARGET_ARCH ?= arm64
+    HOST_ARCH ?= arm64
 else
     $(error Unsupported architecture: $(UNAME_ARCH))
+endif
+
+TARGET_ARCH ?= $(HOST_ARCH)
+
+# Architecture-specific images with SHAs.
+# We need the architecture-specific versions because referring to the multi-platform digest will end
+# up getting errors if you try two different platforms -- the second platform will have the same SHA
+# but resolve to a different underlying image.
+# More info on that here: https://github.com/moby/moby/issues/43188
+#
+# For each of these images, you can fetch the platform-specific SHAs with:
+#
+#   docker manifest inspect <image>:<tag>@sha256:<SHA> \
+#     | jq '.manifests[] | select(.platform.os == "linux") | select(.platform.architecture == "amd64" or .platform.architecture == "arm64")'
+#
+# If you get "manifest verification failed", it might be that the tag no longer refers to that SHA.
+# You can try again with 'docker manifest inspect <image>@sha256:<SHA>' instead (dropping the ':<tag>')
+
+# alpine images for @sha256:e5d0aea7f7d2954678a9a6269ca2d06e06591881161961ea59e974dff3f12377
+ALPINE_IMG_TAG ?= 3.19.7
+ALPINE_IMG_SHA_AMD64 ?= @sha256:06793e3dc83d9a0733c70010283ed1735ff75fc0d40e3eac330aaef41a2f5049
+ALPINE_IMG_SHA_ARM64 ?= @sha256:b77521a60a51daad2b199da6efdd78956f79739d36379c2d13165f18ae1c4bee
+
+# golang images for @sha256:ef18ee7117463ac1055f5a370ed18b8750f01589f13ea0b48642f5792b234044
+GOLANG_IMG_TAG ?= 1.24.3-alpine
+GOLANG_IMG_SHA_AMD64 ?= @sha256:be1cf73ca9fbe9c5108691405b627cf68b654fb6838a17bc1e95cc48593e70da
+GOLANG_IMG_SHA_ARM64 ?= @sha256:fc5d0e129a17eb8c40c872b3337f548ed003ae93e658b647761562e17ff3058d
+
+# gcr.io/distroless/static images for @sha256:6ec5aa99dc335666e79dc64e4a6c8b89c33a543a1967f20d360922a80dd21f02
+DISTROLESS_IMG_TAG ?= nonroot
+DISTROLESS_IMG_SHA_AMD64 ?= @sha256:e855cfad87387db4658f58f72e09f243bdb58f0697e0535d371092d8c03dfd82
+DISTROLESS_IMG_SHA_ARM64 ?= @sha256:27a586a3bf6339aad15f4fd6048e6c6381f76a18d971c1c5a5e691e1fb59b880
+
+# ubuntu images for @sha256:72297848456d5d37d1262630108ab308d3e9ec7ed1c3286a32fe09856619a782
+UBUNTU_IMG_TAG ?= 24.04
+UBUNTU_IMG_SHA_AMD64 ?= @sha256:3afff29dffbc200d202546dc6c4f614edc3b109691e7ab4aa23d02b42ba86790
+UBUNTU_IMG_SHA_ARM64 ?= @sha256:a3f23b6e99cee41b8fffbd8a22d75728bb1f06af30fc79f533f27c096eda8993
+
+# busybox images for @sha256:1602e40bcbe33b2424709f35005c974bb8de80a11e2722316535f38af3036da8
+BUSYBOX_IMG_TAG ?= 1.35.0-musl
+BUSYBOX_IMG_SHA_AMD64 ?= @sha256:e0b2a0f0bbb24966adb038db1fba7f45d25804602b53d901474b21122399962d
+BUSYBOX_IMG_SHA_ARM64 ?= @sha256:86e3969e2c5b1a006da06016224b1579a52b1e770e8c2779ba45ac9d600c9418
+
+# rust images for @sha256:1030547bd568497d69e41771ada279179f0613369dc54779e46a3f6f376b3020
+RUST_IMG_TAG ?= 1.85-alpine
+RUST_IMG_SHA_AMD64 ?= @sha256:84b5e9c7c2f9437f62769913b419cc02a1e310bf40fd86720cd2b3b64bffb452
+RUST_IMG_SHA_ARM64 ?= @sha256:bda9e5682eeb0013c19b06e469812ae54cbe76cf0128796def8eb9bfe30a5c72
+
+ifeq ($(HOST_ARCH),amd64)
+	UBUNTU_IMG_SHA ?= $(UBUNTU_IMG_SHA_AMD64)
+else ifeq ($(HOST_ARCH),arm64)
+	UBUNTU_IMG_SHA ?= $(UBUNTU_IMG_SHA_ARM64)
+else
+	$(error Unsupported HOST_ARCH: $(HOST_ARCH))
+endif
+
+
+ifeq ($(TARGET_ARCH),amd64)
+	ALPINE_IMG_SHA ?= $(ALPINE_IMG_SHA_AMD64)
+	GOLANG_IMG_SHA ?= $(GOLANG_IMG_SHA_AMD64)
+	DISTROLESS_IMG_SHA ?= $(DISTROLESS_IMG_SHA_AMD64)
+	RUST_IMG_SHA ?= $(RUST_IMG_SHA_AMD64)
+else ifeq ($(TARGET_ARCH),arm64)
+	ALPINE_IMG_SHA ?= $(ALPINE_IMG_SHA_ARM64)
+	GOLANG_IMG_SHA ?= $(GOLANG_IMG_SHA_ARM64)
+	DISTROLESS_IMG_SHA ?= $(DISTROLESS_IMG_SHA_ARM64)
+	RUST_IMG_SHA ?= $(RUST_IMG_SHA_ARM64)
+else
+	$(error Unsupported TARGET_ARCH: $(TARGET_ARCH))
 endif
 
 # Get the currently used golang base path
@@ -165,7 +234,14 @@ build: vet bin/vm-builder ## Build all neonvm binaries.
 
 .PHONY: bin/vm-builder
 bin/vm-builder: ## Build vm-builder binary.
-	CGO_ENABLED=0 go build -o bin/vm-builder -ldflags "-X main.Version=${GIT_INFO} -X main.NeonvmDaemonImage=${IMG_DAEMON}" vm-builder/*.go
+	CGO_ENABLED=0 go build \
+		-o bin/vm-builder \
+		-ldflags "\
+			-X main.Version=${GIT_INFO} -X main.NeonvmDaemonImage=${IMG_DAEMON} \
+			-X main.AlpineImageTag=${ALPINE_IMG_TAG} -X main.AlpineImageShaAmd64=${ALPINE_IMG_SHA_AMD64} -X main.AlpineImageShaArm64=${ALPINE_IMG_SHA_ARM64} \
+			-X main.BusyboxImageTag=${BUSYBOX_IMG_TAG} -X main.BusyboxImageShaAmd64=${BUSYBOX_IMG_SHA_AMD64} -X main.BusyboxImageShaArm64=${BUSYBOX_IMG_SHA_ARM64} \
+			" \
+		vm-builder/*.go
 .PHONY: run
 run: vet ## Run a controller from your host.
 	go run ./neonvm/main.go
@@ -192,6 +268,9 @@ docker-push: docker-build ## Push docker images to docker registry
 docker-build-go-base:
 	docker build \
 		--tag $(GO_BASE_IMG) \
+		--build-arg GOLANG_IMG_TAG=$(GOLANG_IMG_TAG) \
+		--build-arg GOLANG_IMG_SHA=$(GOLANG_IMG_SHA) \
+		--platform=linux/$(TARGET_ARCH) \
 		--file go-base.Dockerfile \
 		.
 
@@ -200,7 +279,9 @@ docker-build-controller: docker-build-go-base ## Build docker image for NeonVM c
 	docker build \
 		--tag $(IMG_CONTROLLER) \
 		--build-arg GO_BASE_IMG=$(GO_BASE_IMG) \
-		--build-arg VM_RUNNER_IMAGE=$(IMG_RUNNER) \
+		--build-arg DISTROLESS_IMG_SHA=$(DISTROLESS_IMG_SHA) \
+		--build-arg DISTROLESS_IMG_TAG=$(DISTROLESS_IMG_TAG) \
+		--platform=linux/$(TARGET_ARCH) \
 		--file neonvm-controller/Dockerfile \
 		.
 
@@ -208,7 +289,10 @@ docker-build-controller: docker-build-go-base ## Build docker image for NeonVM c
 docker-build-runner: docker-build-go-base ## Build docker image for NeonVM runner
 	docker build \
 		--tag $(IMG_RUNNER) \
+		--build-arg ALPINE_IMG_TAG=$(ALPINE_IMG_TAG) \
+		--build-arg ALPINE_IMG_SHA=$(ALPINE_IMG_SHA) \
 		--build-arg GO_BASE_IMG=$(GO_BASE_IMG) \
+		--platform=linux/$(TARGET_ARCH) \
 		--file neonvm-runner/Dockerfile \
 		.
 
@@ -217,6 +301,7 @@ docker-build-daemon: docker-build-go-base ## Build docker image for NeonVM daemo
 	docker build \
 		--tag $(IMG_DAEMON) \
 		--build-arg TARGET_ARCH=$(TARGET_ARCH) \
+		--platform=linux/$(TARGET_ARCH) \
 		--file neonvm-daemon/Dockerfile \
 		.
 
@@ -224,36 +309,57 @@ docker-build-daemon: docker-build-go-base ## Build docker image for NeonVM daemo
 docker-build-vxlan-controller: docker-build-go-base ## Build docker image for NeonVM vxlan controller
 	docker build \
 		--tag $(IMG_VXLAN_CONTROLLER) \
+		--build-arg ALPINE_IMG_TAG=$(ALPINE_IMG_TAG) \
+		--build-arg ALPINE_IMG_SHA=$(ALPINE_IMG_SHA) \
 		--build-arg GO_BASE_IMG=$(GO_BASE_IMG) \
 		--build-arg TARGET_ARCH=$(TARGET_ARCH) \
+		--platform=linux/$(TARGET_ARCH) \
 		--file neonvm-vxlan-controller/Dockerfile \
 		.
 
 .PHONY: docker-build-autoscaler-agent
 docker-build-autoscaler-agent: docker-build-go-base ## Build docker image for autoscaler-agent
-	docker buildx build \
+	docker build \
 		--tag $(IMG_AUTOSCALER_AGENT) \
+		--build-arg ALPINE_IMG_TAG=$(ALPINE_IMG_TAG) \
+		--build-arg ALPINE_IMG_SHA=$(ALPINE_IMG_SHA) \
 		--build-arg GO_BASE_IMG=$(GO_BASE_IMG) \
-		--build-arg "GIT_INFO=$(GIT_INFO)" \
+		--platform=linux/$(TARGET_ARCH) \
 		--file autoscaler-agent/Dockerfile \
 		.
 
 .PHONY: docker-build-scheduler
 docker-build-scheduler: docker-build-go-base ## Build docker image for (autoscaling) scheduler
-	docker buildx build \
+	docker build \
 		--tag $(IMG_SCHEDULER) \
+		--build-arg ALPINE_IMG_TAG=$(ALPINE_IMG_TAG) \
+		--build-arg ALPINE_IMG_SHA=$(ALPINE_IMG_SHA) \
 		--build-arg GO_BASE_IMG=$(GO_BASE_IMG) \
-		--build-arg "GIT_INFO=$(GIT_INFO)" \
+		--platform=linux/$(TARGET_ARCH) \
 		--file autoscale-scheduler/Dockerfile \
 		.
 
 .PHONY: docker-build-vm-postgres
 docker-build-vm-postgres: bin/vm-builder ## Build docker images for testing VMs
-	./bin/vm-builder -src postgres:15-bullseye -dst $(E2E_TESTS_VM_IMG) -spec tests/e2e/image-spec.yaml -target-arch linux/$(TARGET_ARCH)
+	./bin/vm-builder \
+		-src postgres:15-bullseye \
+		-dst $(E2E_TESTS_VM_IMG) \
+		-build-arg RUST_IMG_TAG=$(RUST_IMG_TAG) \
+		-build-arg RUST_IMG_SHA=$(RUST_IMG_SHA) \
+		-target-arch linux/$(TARGET_ARCH) \
+		-spec tests/e2e/image-spec.yaml
 
 .PHONY: docker-build-pg16-disk-test
 docker-build-pg16-disk-test: bin/vm-builder ## Build a VM image for testing
-	./bin/vm-builder -src alpine:3.19 -dst $(PG16_DISK_TEST_IMG) -spec vm-examples/pg16-disk-test/image-spec.yaml -target-arch linux/$(TARGET_ARCH)
+	./bin/vm-builder \
+		-src alpine:$(ALPINE_IMG_TAG)$(ALPINE_IMG_SHA) \
+		-dst $(PG16_DISK_TEST_IMG) \
+		-build-arg ALPINE_IMG_TAG=$(ALPINE_IMG_TAG) \
+		-build-arg ALPINE_IMG_SHA=$(ALPINE_IMG_SHA) \
+		-build-arg RUST_IMG_TAG=$(RUST_IMG_TAG) \
+		-build-arg RUST_IMG_SHA=$(RUST_IMG_SHA) \
+		-target-arch linux/$(TARGET_ARCH) \
+		-spec vm-examples/pg16-disk-test/image-spec.yaml
 
 #.PHONY: docker-push
 #docker-push: ## Push docker image with the controller.
@@ -288,26 +394,31 @@ endif
 # Target is generic and can be used for any supported architecture by specifying the TARGET_ARCH variable.
 .PHONY: kernel
 kernel: ## Build linux kernel.
+	set -eux; \
 	rm -f neonvm-kernel/vmlinuz; \
 	kernel_version="$$(neonvm-kernel/echo-version.sh)"; \
-	iidfile=$$(mktemp /tmp/iid-XXXXXX); \
-	trap "rm $$iidfile" EXIT; \
 	version_suffix="-local-$$(date -u '+%FT%TZ')-$$(git describe --dirty)"; \
 	docker buildx build \
+		--tag neonvm-kernel:dev \
+		--build-arg UBUNTU_IMG_TAG=$(UBUNTU_IMG_TAG) \
+		--build-arg UBUNTU_IMG_SHA=$(UBUNTU_IMG_SHA) \
+		--build-arg ALPINE_IMG_TAG=$(ALPINE_IMG_TAG) \
+		--build-arg ALPINE_IMG_SHA=$(ALPINE_IMG_SHA) \
+		--build-arg ALPINE_IMG_SHA_AMD64=$(ALPINE_IMG_SHA_AMD64) \
+		--build-arg ALPINE_IMG_SHA_ARM64=$(ALPINE_IMG_SHA_ARM64) \
 		--build-arg KERNEL_VERSION=$$kernel_version \
 		--build-arg VERSION_SUFFIX=$$version_suffix \
 		--target "kernel_${TARGET_ARCH}" \
-		--pull \
-		--load \
-		--iidfile $$iidfile \
+		--platform linux/$(HOST_ARCH) \
 		--file neonvm-kernel/Dockerfile \
 		neonvm-kernel; \
-	id=$$(docker create $$(cat $$iidfile)); \
+	id=$$(docker create neonvm-kernel:dev); \
 	docker cp $$id:/vmlinuz neonvm-kernel/vmlinuz; \
 	docker rm -f $$id
 
 .PHONY: kernel-source
 kernel-source: ## Set up git repo for the current kernel version and apply existing patches
+	set -eux; \
 	kernel_version="$$(neonvm-kernel/echo-version.sh)"; \
 	dir="neonvm-kernel/linux"; \
 	mkdir -p "$$dir"; \
@@ -325,6 +436,7 @@ kernel-source: ## Set up git repo for the current kernel version and apply exist
 
 .PHONY: kernel-patches
 kernel-patches: ## Generate kernel patch files from the git repo
+	set -eux; \
 	kernel_version="$$(neonvm-kernel/echo-version.sh)"; \
 	dir='neonvm-kernel/linux'; \
 	( set -x ; test -e "$$dir/.git" ); \

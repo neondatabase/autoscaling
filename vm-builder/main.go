@@ -67,6 +67,14 @@ var (
 	Version           string
 	NeonvmDaemonImage string
 
+	BusyboxImageTag      string
+	BusyboxImageShaAmd64 string
+	BusyboxImageShaArm64 string
+
+	AlpineImageTag      string
+	AlpineImageShaAmd64 string
+	AlpineImageShaArm64 string
+
 	srcImage  = flag.String("src", "", `Docker image used as source for virtual machine disk image: --src=alpine:3.19`)
 	dstImage  = flag.String("dst", "", `Docker image with resulting disk image: --dst=vm-alpine:3.19`)
 	size      = flag.String("size", "1G", `Size for disk image: --size=1G`)
@@ -119,6 +127,11 @@ type TemplatesContext struct {
 	RootDiskImage string
 
 	NeonvmDaemonImage string
+
+	BusyboxImageTag string
+	BusyboxImageSha string
+	AlpineImageTag  string
+	AlpineImageSha  string
 
 	SpecBuild       string
 	SpecMerge       string
@@ -304,6 +317,12 @@ func main() {
 		RootDiskImage: *srcImage,
 
 		NeonvmDaemonImage: neonvmDaemonImage,
+
+		BusyboxImageTag: BusyboxImageTag,
+		BusyboxImageSha: getImageSha(*targetArch, BusyboxImageShaAmd64, BusyboxImageShaArm64),
+
+		AlpineImageTag: AlpineImageTag,
+		AlpineImageSha: getImageSha(*targetArch, AlpineImageShaAmd64, AlpineImageShaArm64),
 
 		SpecBuild:       "",  // overridden below if spec != nil
 		SpecMerge:       "",  // overridden below if spec != nil
@@ -578,6 +597,18 @@ func getAgettyTTY(targetArch string) string {
 		return "ttyS0"
 	case targetArchLinuxArm64:
 		return "ttyAMA0"
+	default:
+		log.Fatalf("Unsupported target architecture: %q", targetArch)
+		return ""
+	}
+}
+
+func getImageSha(targetArch string, shaAmd64 string, shaArm64 string) string {
+	switch targetArch {
+	case targetArchLinuxAmd64:
+		return shaAmd64
+	case targetArchLinuxArm64:
+		return shaArm64
 	default:
 		log.Fatalf("Unsupported target architecture: %q", targetArch)
 		return ""

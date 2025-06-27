@@ -9,9 +9,9 @@ USER root
 
 FROM {{.NeonvmDaemonImage}} AS neonvm-daemon-loader
 
-FROM busybox:1.35.0-musl@sha256:1602e40bcbe33b2424709f35005c974bb8de80a11e2722316535f38af3036da8 AS busybox-loader
+FROM busybox:{{.BusyboxImageTag}}{{.BusyboxImageSha}} AS busybox-loader
 
-FROM alpine:3.19.7@sha256:e5d0aea7f7d2954678a9a6269ca2d06e06591881161961ea59e974dff3f12377 AS vm-runtime
+FROM alpine:{{.AlpineImageTag}}{{.AlpineImageSha}} AS vm-runtime
 ARG VM_BUILDER_TARGET_ARCH
 RUN set -e && mkdir -p /neonvm/bin /neonvm/runtime /neonvm/config 
 # add busybox
@@ -109,7 +109,7 @@ RUN set -e \
     && /neonvm/bin/id -g sshd > /dev/null 2>&1 || /neonvm/bin/addgroup sshd \
     && /neonvm/bin/id -u sshd > /dev/null 2>&1 || /neonvm/bin/adduser -D -H -G sshd -g 'sshd privsep' -s /neonvm/bin/nologin sshd
 
-FROM alpine:3.19.7@sha256:e5d0aea7f7d2954678a9a6269ca2d06e06591881161961ea59e974dff3f12377 AS builder
+FROM alpine:{{.AlpineImageTag}}{{.AlpineImageSha}} AS builder
 ARG VM_BUILDER_DISK_SIZE
 COPY --from=rootdisk-mod / /rootdisk
 
@@ -128,5 +128,5 @@ RUN set -e \
     && mkfs.ext4 -L vmroot -d /rootdisk /disk.raw ${VM_BUILDER_DISK_SIZE} \
     && qemu-img convert -f raw -O qcow2 -o cluster_size=2M,lazy_refcounts=on /disk.raw /disk.qcow2
 
-FROM alpine:3.19.7@sha256:e5d0aea7f7d2954678a9a6269ca2d06e06591881161961ea59e974dff3f12377
+FROM alpine:{{.AlpineImageTag}}{{.AlpineImageSha}}
 COPY --from=builder /disk.qcow2 /
