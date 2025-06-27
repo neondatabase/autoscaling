@@ -1,0 +1,278 @@
+package ipam
+
+import (
+	"context"
+	"fmt"
+	"net"
+	"net/netip"
+	"sync"
+	"time"
+
+	"github.com/Jille/contextcond"
+	"sigs.k8s.io/controller-runtime/pkg/log"
+
+	"github.com/neondatabase/autoscaling/pkg/util"
+)
+
+type IPAMManagerConfig struct {
+	CooldownPeriod string `json:"cooldown_period"`
+	HighIPCount    int    `json:"high_ip_count"`
+	LowIPCount     int    `json:"low_ip_count"`
+	TargetIPCount  int    `json:"target_ip_count"`
+
+	cooldownPeriod time.Duration
+}
+
+func (c *IPAMManagerConfig) Validate() error {
+	if c.CooldownPeriod == "" {
+		return fmt.Errorf("cooldown period must be set")
+	}
+
+	if c.HighIPCount <= 0 {
+		return fmt.Errorf("high IP count must be positive")
+	}
+
+	if c.LowIPCount <= 0 {
+		return fmt.Errorf("low IP count must be positive")
+	}
+
+	if c.TargetIPCount <= 0 {
+		return fmt.Errorf("target IP count must be positive")
+	}
+
+	if c.HighIPCount < c.TargetIPCount {
+		return fmt.Errorf("high IP count must be greater than target IP count")
+	}
+
+	if c.LowIPCount > c.TargetIPCount {
+		return fmt.Errorf("low IP count must be less than target IP count")
+	}
+
+	cooldownPeriod, err := time.ParseDuration(c.CooldownPeriod)
+	if err != nil {
+		return fmt.Errorf("invalid cooldown period: %w", err)
+	}
+	c.cooldownPeriod = cooldownPeriod
+
+	return nil
+}
+
+type VMID = util.NamespacedName
+
+type Manager struct {
+	cfg  *IPAMManagerConfig
+	pool *ipPoolClient
+
+	allocations   map[VMID]netip.Addr
+	free          []netip.Addr
+	unknown       map[netip.Addr]struct{}
+	cooldownQueue []CooldownEntry
+
+	// Acquired for every public method
+	rebalanceCondition *contextcond.Cond
+	mu                 sync.Mutex
+}
+
+type CooldownEntry struct {
+	ip       netip.Addr
+	deadline time.Time
+}
+
+func (m *Manager) Allocate(ctx context.Context, vmID VMID) (net.IPNet, error) {
+	if ip, ok := m.allocations[vmID]; ok {
+		return m.ipToNet(ip), nil
+	}
+	if ctx.Err() != nil {
+		return net.IPNet{}, ctx.Err()
+	}
+
+	// If any IPs are cold already
+	m.finishCooldown()
+
+	if len(m.free) == 0 {
+		// Do sync rebalance
+		m.callRebalance(ctx)
+	}
+
+	if len(m.free) == 0 {
+		// Didn't help
+		return net.IPNet{}, fmt.Errorf("no IPs in the pool")
+	}
+
+	// Take last free IP
+	// ip := m.free[len(m.free)-1]
+	// m.free = m.free[:len(m.free)-1]
+	ip := m.free[0]
+	m.free = m.free[1:]
+	// NOTE: maybe we should actually take IPs from the head of m.free, not tail?
+	// This will grant us an additional time gap between end of CooldownPeriod, and new allocation of a particular IP.
+
+	m.allocations[vmID] = ip
+
+	// Trigger always
+	m.asyncRebalance()
+
+	return m.ipToNet(ip), nil
+}
+
+func (m *Manager) Release(_ context.Context, vmID VMID, ip netip.Addr) error {
+	if _, ok := m.unknown[ip]; ok {
+		delete(m.unknown, ip)
+	} else if _, ok := m.allocations[vmID]; !ok {
+		delete(m.allocations, vmID)
+	} else {
+		return fmt.Errorf("attempt to release unfamiliar allocation %s %s", vmID, ip)
+	}
+
+	m.startCooldown(ip)
+
+	// Trigger always
+	m.asyncRebalance()
+
+	return nil
+}
+
+func (m *Manager) ipToNet(ip netip.Addr) net.IPNet {
+	return net.IPNet{IP: ip.AsSlice(), Mask: m.pool.ipnet.Mask}
+}
+
+func (m *Manager) startCooldown(ip netip.Addr) {
+	m.cooldownQueue = append(m.cooldownQueue,
+		CooldownEntry{
+			ip:       ip,
+			deadline: time.Now().Add(m.cfg.cooldownPeriod),
+		},
+	)
+
+	m.finishCooldown()
+}
+
+func (m *Manager) finishCooldown() {
+	now := time.Now()
+	for len(m.cooldownQueue) > 0 {
+		head := m.cooldownQueue[0]
+		if head.deadline.After(now) {
+			return
+		}
+
+		m.free = append(m.free, head.ip)
+		m.cooldownQueue = m.cooldownQueue[1:]
+	}
+}
+
+func (m *Manager) SetActive(active map[netip.Addr]VMID) {
+	for ip := range m.unknown {
+		vmID, ok := active[ip]
+		if ok {
+			m.allocations[vmID] = ip
+		} else {
+			m.startCooldown(ip)
+		}
+	}
+
+	m.unknown = nil
+}
+
+func (m *Manager) asyncRebalance() {
+	if m.needRebalance() {
+		m.rebalanceCondition.Signal()
+	}
+}
+
+func (m *Manager) needRebalance() bool {
+	return len(m.free) > m.cfg.HighIPCount || len(m.free) < m.cfg.LowIPCount
+}
+
+func (m *Manager) Run(ctx context.Context) {
+	log := log.FromContext(ctx)
+
+	for {
+		err := m.rebalanceCondition.WaitContext(ctx)
+		if err != nil {
+			log.Info("context cancelled, stopping rebalance loop")
+			return
+		}
+
+		m.callRebalance(ctx)
+	}
+}
+
+func NewManager(ctx context.Context, cfg *IPAMManagerConfig, poolClient *ipPoolClient) (*Manager, error) {
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+
+	pool, err := poolClient.Get(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	m := &Manager{
+		cfg:  cfg,
+		pool: poolClient,
+
+		allocations:   make(map[VMID]netip.Addr),
+		unknown:       pool.Spec.Managed,
+		free:          nil,
+		cooldownQueue: nil,
+
+		rebalanceCondition: nil,
+		mu:                 sync.Mutex{},
+	}
+
+	m.rebalanceCondition = contextcond.NewCond(&m.mu)
+
+	return m, nil
+}
+
+func (m *Manager) callRebalance(ctx context.Context) {
+	log := log.FromContext(ctx)
+
+	err := m.rebalance(ctx)
+	if err != nil {
+		log.Error(err, "error rebalancing IP pool")
+	} else {
+		log.Info("rebalanced IP pool", "pool", m.pool.PoolName(), "free", len(m.free), "unknown", len(m.unknown))
+	}
+}
+
+func (m *Manager) rebalance(ctx context.Context) error {
+	if !m.needRebalance() {
+		return nil
+	}
+
+	pool, err := m.pool.Get(ctx)
+	if err != nil {
+		return err
+	}
+
+	// commit new free IPs only when
+	// pool is commited
+	var newFree []netip.Addr
+
+	// We have too many IPs
+	if len(m.free) > m.cfg.HighIPCount {
+		for _, ip := range m.free[m.cfg.TargetIPCount:] {
+			delete(pool.Spec.Managed, ip)
+		}
+
+		newFree = m.free[:m.cfg.TargetIPCount]
+	}
+	// We have not enough IPs
+	if len(m.free) < m.cfg.LowIPCount {
+		newFree = append(newFree, m.free...)
+		for ip := range m.pool.AllIPs() {
+			newFree = append(newFree, ip)
+			pool.Spec.Managed[ip] = struct{}{}
+		}
+	}
+
+	err = m.pool.Commit(ctx, pool)
+	if err != nil {
+		return err
+	}
+
+	m.free = newFree
+
+	return nil
+}

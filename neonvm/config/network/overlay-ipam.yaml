@@ -7,6 +7,12 @@ spec:
   config: '{
     "ipam": {
       "network_name": "neonvm",
+      "manager": {
+        "cooldown_period": "10s",
+        "high_ip_count": 100,
+        "low_ip_count": 50,
+        "target_ip_count": 75
+      },
       "ipRanges": [
         {
           "range": "10.100.0.0/16",

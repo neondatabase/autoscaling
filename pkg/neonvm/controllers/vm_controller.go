@@ -25,6 +25,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"net/netip"
 	"os"
 	"reflect"
 	"time"
@@ -226,11 +227,19 @@ func (r *VMReconciler) doFinalizerOperationsForVirtualMachine(ctx context.Contex
 	log.Info("Deleting VirtualMachine")
 
 	// Release overlay IP address
-	if vm.Spec.ExtraNetwork != nil {
-		ip, err := r.IPAM.ReleaseIP(ctx, types.NamespacedName{Name: vm.Name, Namespace: vm.Namespace})
-		if err != nil {
-			return fmt.Errorf("fail to release overlay IP: %w", err)
+	if vm.Spec.ExtraNetwork != nil && len(vm.Status.ExtraNetIP) > 0 {
+		vm.Status.ExtraNetIP = ""
+		if err := r.Status().Update(ctx, vm); err != nil {
+			return fmt.Errorf("Failed to update VirtualMachine status: %w", err)
 		}
+
+		ip, err := netip.ParseAddr(vm.Status.ExtraNetIP)
+		if err != nil {
+			return fmt.Errorf("invalid IP: %s: %w", vm.Status.ExtraNetIP, err)
+		}
+
+		r.IPAM.ReleaseIP(ctx, types.NamespacedName{Name: vm.Name, Namespace: vm.Namespace}, ip)
+
 		log.Info(fmt.Sprintf("Released overlay IP %s", ip.String()))
 	}
 	return nil
@@ -296,7 +305,7 @@ func (r *VMReconciler) acquireOverlayIP(ctx context.Context, vm *vmv1.VirtualMac
 	if err != nil {
 		return err
 	}
-	vm.Status.ExtraNetIP = ip.IP.String()
+	vm.Status.ExtraNetIP = ip.String()
 	vm.Status.ExtraNetMask = fmt.Sprintf("%d.%d.%d.%d", ip.Mask[0], ip.Mask[1], ip.Mask[2], ip.Mask[3])
 	log.Info(fmt.Sprintf("Acquired IP %s for overlay network interface", ip.String()))
 	return nil
