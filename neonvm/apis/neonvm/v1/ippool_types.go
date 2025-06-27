@@ -20,6 +20,7 @@ type IPPoolSpec struct {
 	// Deprecated: This field is deprecated and will be removed in a future version.
 	// Allocations is the set of allocated IPs for the given range. Its` indices are a direct mapping to the
 	// IP with the same index/offset for the pool's range.
+	// +kubebuilder:validation:Optional
 	Allocations map[string]IPAllocation `json:"allocations"`
 }
 
