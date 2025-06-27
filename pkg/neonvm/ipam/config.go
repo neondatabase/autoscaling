@@ -26,7 +26,7 @@ type IPAMConfig struct {
 	IPRanges         []RangeConfiguration `json:"ipRanges"`
 	NetworkNamespace string
 	NetworkName      string             `json:"network_name,omitempty"`
-	ManagerConfig    *IPAMManagerConfig `json:"manager_config,omitempty"`
+	ManagerConfig    *IPAMManagerConfig `json:"manager,omitempty"`
 }
 
 type RangeConfiguration struct {
@@ -34,6 +34,24 @@ type RangeConfiguration struct {
 	Range      string   `json:"range"`
 	RangeStart net.IP   `json:"range_start,omitempty"`
 	RangeEnd   net.IP   `json:"range_end,omitempty"`
+}
+
+func lastIP(ipNet *net.IPNet) net.IP {
+	ip := ipNet.IP
+	mask := ipNet.Mask
+	if ip.To4() != nil {
+		ip = ip.To4()
+		mask = net.IPMask(net.IP(mask).To4())
+
+	}
+	lastIP := make(net.IP, len(ip))
+
+	// ~mask has ones in places which would be variable in the subnet
+	// so we OR it with the start IP to get the end of the range
+	for i := range ip {
+		lastIP[i] = ip[i] | ^mask[i]
+	}
+	return lastIP
 }
 
 func loadFromNad(nadConfig string, nadNamespace string) (*IPAMConfig, error) {
@@ -61,6 +79,9 @@ func loadFromNad(nadConfig string, nadNamespace string) (*IPAMConfig, error) {
 			return nil, fmt.Errorf("range_start IP %s not in IP Range %s",
 				rangeConfig.RangeStart.String(),
 				rangeConfig.Range)
+		}
+		if rangeConfig.RangeEnd == nil {
+			rangeConfig.RangeEnd = lastIP(ipNet)
 		}
 		if rangeConfig.RangeEnd != nil && !ipNet.Contains(rangeConfig.RangeEnd) {
 			return nil, fmt.Errorf("range_end IP %s not in IP Range %s",

@@ -103,6 +103,8 @@ func FromClient(kClient *Client, params IPAMParams) (*IPAM, error) {
 	}
 
 	if ipamConfig.ManagerConfig == nil {
+
+		fmt.Println("MEON WTF: %s, %+v", nad.Spec.Config, ipamConfig)
 		return nil, fmt.Errorf("network-attachment-definition %s has no manager config", nad.Name)
 	}
 
