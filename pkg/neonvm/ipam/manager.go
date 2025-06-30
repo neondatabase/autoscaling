@@ -79,7 +79,46 @@ type CooldownEntry struct {
 	deadline time.Time
 }
 
+func NewManager(ctx context.Context, cfg *IPAMManagerConfig, poolClient *ipPoolClient) (*Manager, error) {
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+
+	pool, err := poolClient.Get(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	m := &Manager{
+		cfg:  cfg,
+		pool: poolClient,
+
+		allocations:   make(map[VMID]netip.Addr),
+		unknown:       make(map[netip.Addr]struct{}),
+		free:          nil,
+		cooldownQueue: nil,
+
+		rebalanceCondition: nil,
+		mu:                 sync.Mutex{},
+	}
+
+	for ip := range pool.Spec.Managed {
+		ip, err := netip.ParseAddr(ip)
+		if err != nil {
+			return nil, fmt.Errorf("invalid IP in pool: %w", err)
+		}
+		m.unknown[ip] = struct{}{}
+	}
+
+	m.rebalanceCondition = contextcond.NewCond(&m.mu)
+
+	return m, nil
+}
+
 func (m *Manager) Allocate(ctx context.Context, vmID VMID) (net.IPNet, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	if ip, ok := m.allocations[vmID]; ok {
 		return m.ipToNet(ip), nil
 	}
@@ -117,6 +156,9 @@ func (m *Manager) Allocate(ctx context.Context, vmID VMID) (net.IPNet, error) {
 }
 
 func (m *Manager) Release(_ context.Context, vmID VMID, ip netip.Addr) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	if _, ok := m.unknown[ip]; ok {
 		delete(m.unknown, ip)
 	} else if _, ok := m.allocations[vmID]; !ok {
@@ -162,6 +204,9 @@ func (m *Manager) finishCooldown() {
 }
 
 func (m *Manager) SetActive(active map[netip.Addr]VMID) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	for ip := range m.unknown {
 		vmID, ok := active[ip]
 		if ok {
@@ -174,17 +219,10 @@ func (m *Manager) SetActive(active map[netip.Addr]VMID) {
 	m.unknown = nil
 }
 
-func (m *Manager) asyncRebalance() {
-	if m.needRebalance() {
-		m.rebalanceCondition.Signal()
-	}
-}
-
-func (m *Manager) needRebalance() bool {
-	return len(m.free) > m.cfg.HighIPCount || len(m.free) < m.cfg.LowIPCount
-}
-
 func (m *Manager) Run(ctx context.Context) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	log := log.FromContext(ctx)
 
 	for {
@@ -198,40 +236,14 @@ func (m *Manager) Run(ctx context.Context) {
 	}
 }
 
-func NewManager(ctx context.Context, cfg *IPAMManagerConfig, poolClient *ipPoolClient) (*Manager, error) {
-	if err := cfg.Validate(); err != nil {
-		return nil, err
+func (m *Manager) asyncRebalance() {
+	if m.needRebalance() {
+		m.rebalanceCondition.Signal()
 	}
+}
 
-	pool, err := poolClient.Get(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	m := &Manager{
-		cfg:  cfg,
-		pool: poolClient,
-
-		allocations:   make(map[VMID]netip.Addr),
-		unknown:       make(map[netip.Addr]struct{}),
-		free:          nil,
-		cooldownQueue: nil,
-
-		rebalanceCondition: nil,
-		mu:                 sync.Mutex{},
-	}
-
-	for ip := range pool.Spec.Managed {
-		ip, err := netip.ParseAddr(ip)
-		if err != nil {
-			return nil, fmt.Errorf("invalid IP in pool: %w", err)
-		}
-		m.unknown[ip] = struct{}{}
-	}
-
-	m.rebalanceCondition = contextcond.NewCond(&m.mu)
-
-	return m, nil
+func (m *Manager) needRebalance() bool {
+	return len(m.free) > m.cfg.HighIPCount || len(m.free) < m.cfg.LowIPCount
 }
 
 func (m *Manager) callRebalance(ctx context.Context) {
@@ -272,7 +284,7 @@ func (m *Manager) rebalance(ctx context.Context) error {
 		newFree = append(newFree, m.free...)
 		for ip := range m.pool.AllIPs() {
 			newFree = append(newFree, ip)
-			pool.Spec.Managed[ip.String()] = v1.Empty{}
+			pool.Spec.Managed[ip.String()] = v1.Unit{}
 		}
 	}
 

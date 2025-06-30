@@ -57,7 +57,7 @@ spec:
                 type: object
               managed:
                 additionalProperties:
-                  description: Empty represents an empty struct for use in sets/maps
+                  description: Unit represents an empty struct for use in sets/maps
                   type: object
                 description: Managed is the set of IPs that are managed by the IPAM
                   manager.
