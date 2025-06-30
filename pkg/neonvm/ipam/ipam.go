@@ -108,7 +108,11 @@ func FromClient(kClient *Client, params IPAMParams) (*IPAM, error) {
 
 	var managers []*Manager
 	for _, rangeConfig := range ipamConfig.IPRanges {
-		poolClient, err := newIPPoolClient(kClient.VMClient, &rangeConfig, ipamConfig)
+		err := rangeConfig.Normalize()
+		if err != nil {
+			return nil, fmt.Errorf("invalid IP range %s: %w", rangeConfig.Range, err)
+		}
+		poolClient, err := NewPoolClient(kClient.VMClient, &rangeConfig, types.NamespacedName{Name: params.NadName, Namespace: params.NadNamespace})
 		if err != nil {
 			return nil, fmt.Errorf("error creating pool client: %w", err)
 		}
@@ -153,7 +157,7 @@ func (i *IPAM) AcquireIP(ctx context.Context, vmName types.NamespacedName) (net.
 }
 
 // ReleaseIP is not idempotent - have to be called exactly once after the VM state was updated.
-func (i *IPAM) ReleaseIP(ctx context.Context, vmName types.NamespacedName, ip netip.Addr) {
+func (i *IPAM) ReleaseIP(ctx context.Context, vmName types.NamespacedName, ip net.IP) {
 	err := i.runIPAMMetered(ctx, IPAMRelease, func(manager *Manager) error {
 		return manager.Release(ctx, VMID(vmName), ip)
 	})

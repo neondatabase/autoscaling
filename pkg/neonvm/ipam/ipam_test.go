@@ -3,7 +3,7 @@ package ipam_test
 import (
 	"context"
 	"fmt"
-	"net/netip"
+	"net"
 	"testing"
 
 	"github.com/go-logr/logr/testr"
@@ -70,7 +70,7 @@ const DefaultIPAMConfig = `
 			"network_name":"nad"
 		}
 	],
-	"manager_config": {
+	"manager": {
 		"cooldown_period": "60s",
 		"high_ip_count": 10,
 		"low_ip_count": 5,
@@ -155,7 +155,7 @@ func TestIPAM(t *testing.T) {
 	assert.Equal(t, "10.100.123.2/24", ip2.String())
 
 	// Release the second IP
-	ipam.ReleaseIP(ctx(t), name, netip.MustParseAddr("10.100.123.2"))
+	ipam.ReleaseIP(ctx(t), name, net.ParseIP("10.100.123.2"))
 
 	// Allocate one more IP
 	name.Name = "vm3"

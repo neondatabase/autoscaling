@@ -62,7 +62,7 @@ type VMID = util.NamespacedName
 
 type Manager struct {
 	cfg  *IPAMManagerConfig
-	pool *ipPoolClient
+	pool *PoolClient
 
 	allocations   map[VMID]netip.Addr
 	free          []netip.Addr
@@ -79,7 +79,7 @@ type CooldownEntry struct {
 	deadline time.Time
 }
 
-func NewManager(ctx context.Context, cfg *IPAMManagerConfig, poolClient *ipPoolClient) (*Manager, error) {
+func NewManager(ctx context.Context, cfg *IPAMManagerConfig, poolClient *PoolClient) (*Manager, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
@@ -155,19 +155,27 @@ func (m *Manager) Allocate(ctx context.Context, vmID VMID) (net.IPNet, error) {
 	return m.ipToNet(ip), nil
 }
 
-func (m *Manager) Release(_ context.Context, vmID VMID, ip netip.Addr) error {
+func (m *Manager) Release(_ context.Context, vmID VMID, ip net.IP) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if _, ok := m.unknown[ip]; ok {
-		delete(m.unknown, ip)
-	} else if _, ok := m.allocations[vmID]; !ok {
+	ipAddr, err := netip.ParseAddr(ip.String())
+	if err != nil {
+		return fmt.Errorf("invalid IP: %s", ip)
+	}
+
+	if _, ok := m.unknown[ipAddr]; ok {
+		delete(m.unknown, ipAddr)
+	} else if allocIP, ok := m.allocations[vmID]; ok {
+		if allocIP.String() != ipAddr.String() {
+			return fmt.Errorf("VM %s: attempted to release %s, allocated %s", vmID, ipAddr, allocIP)
+		}
 		delete(m.allocations, vmID)
 	} else {
 		return fmt.Errorf("attempt to release unfamiliar allocation %s %s", vmID, ip)
 	}
 
-	m.startCooldown(ip)
+	m.startCooldown(ipAddr)
 
 	// Trigger always
 	m.asyncRebalance()
@@ -176,7 +184,7 @@ func (m *Manager) Release(_ context.Context, vmID VMID, ip netip.Addr) error {
 }
 
 func (m *Manager) ipToNet(ip netip.Addr) net.IPNet {
-	return net.IPNet{IP: ip.AsSlice(), Mask: m.pool.ipnet.Mask}
+	return net.IPNet{IP: ip.AsSlice(), Mask: m.pool.rangeConfig.ipNet.Mask}
 }
 
 func (m *Manager) startCooldown(ip netip.Addr) {
@@ -282,7 +290,7 @@ func (m *Manager) rebalance(ctx context.Context) error {
 	// We have not enough IPs
 	if len(m.free) < m.cfg.LowIPCount {
 		newFree = append(newFree, m.free...)
-		for ip := range m.pool.AllIPs() {
+		for ip := range m.pool.rangeConfig.AllIPs() {
 			newFree = append(newFree, ip)
 			pool.Spec.Managed[ip.String()] = v1.Unit{}
 		}

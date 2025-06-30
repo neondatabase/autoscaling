@@ -25,7 +25,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"net/netip"
+	"net"
 	"os"
 	"reflect"
 	"time"
@@ -233,9 +233,9 @@ func (r *VMReconciler) doFinalizerOperationsForVirtualMachine(ctx context.Contex
 			return fmt.Errorf("Failed to update VirtualMachine status: %w", err)
 		}
 
-		ip, err := netip.ParseAddr(vm.Status.ExtraNetIP)
-		if err != nil {
-			return fmt.Errorf("invalid IP: %s: %w", vm.Status.ExtraNetIP, err)
+		ip := net.ParseIP(vm.Status.ExtraNetIP)
+		if ip == nil {
+			return fmt.Errorf("invalid IP: %s", vm.Status.ExtraNetIP)
 		}
 
 		r.IPAM.ReleaseIP(ctx, types.NamespacedName{Name: vm.Name, Namespace: vm.Namespace}, ip)

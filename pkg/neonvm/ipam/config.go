@@ -3,7 +3,9 @@ package ipam
 import (
 	"encoding/json"
 	"fmt"
+	"iter"
 	"net"
+	"net/netip"
 
 	cnitypes "github.com/containernetworking/cni/pkg/types"
 	"github.com/prometheus/client_golang/prometheus"
@@ -34,6 +36,66 @@ type RangeConfiguration struct {
 	Range      string   `json:"range"`
 	RangeStart net.IP   `json:"range_start,omitempty"`
 	RangeEnd   net.IP   `json:"range_end,omitempty"`
+
+	ipNet        *net.IPNet
+	start4, end4 netip.Addr
+}
+
+func (r *RangeConfiguration) Normalize() error {
+	firstip, ipNet, err := net.ParseCIDR(r.Range)
+	if err != nil {
+		return fmt.Errorf("invalid CIDR %s: %w", r.Range, err)
+	}
+	r.ipNet = ipNet
+
+	r.Range = ipNet.String()
+	if r.RangeStart == nil {
+		firstip = net.ParseIP(firstip.Mask(ipNet.Mask).String()) // get real first IP from cidr
+		r.RangeStart = firstip
+	}
+	if !ipNet.Contains(r.RangeStart) {
+		return fmt.Errorf("range_start IP %s not in IP Range %s",
+			r.RangeStart.String(),
+			r.Range)
+	}
+
+	if r.RangeEnd == nil {
+		r.RangeEnd = lastIP(ipNet)
+	}
+	if !ipNet.Contains(r.RangeEnd) {
+		return fmt.Errorf("range_end IP %s not in IP Range %s",
+			r.RangeEnd.String(),
+			r.Range)
+	}
+
+	var ok bool
+	r.start4, ok = netip.AddrFromSlice(r.RangeStart.To4())
+	if !ok {
+		return fmt.Errorf("IP %s is not IPv4", r.RangeStart.String())
+	}
+	r.end4, ok = netip.AddrFromSlice(r.RangeEnd.To4())
+	if !ok {
+		return fmt.Errorf("IP %s is not IPv4", r.RangeEnd.String())
+	}
+
+	return nil
+}
+
+func (r *RangeConfiguration) AllIPs() iter.Seq[netip.Addr] {
+	return func(yield func(netip.Addr) bool) {
+		ip := r.start4
+		for {
+			if !yield(ip) {
+				return
+			}
+
+			ip = ip.Next()
+			if r.end4.Less(ip) {
+				// last IP is reached
+				return
+			}
+		}
+	}
 }
 
 func lastIP(ipNet *net.IPNet) net.IP {
@@ -62,34 +124,6 @@ func loadFromNad(nadConfig string, nadNamespace string) (*IPAMConfig, error) {
 
 	if n.IPAM == nil {
 		return nil, fmt.Errorf("missing 'ipam' key")
-	}
-
-	// check IP ranges
-	for idx, rangeConfig := range n.IPAM.IPRanges {
-		firstip, ipNet, err := net.ParseCIDR(rangeConfig.Range)
-		if err != nil {
-			return nil, fmt.Errorf("invalid CIDR %s: %w", rangeConfig.Range, err)
-		}
-		rangeConfig.Range = ipNet.String()
-		if rangeConfig.RangeStart == nil {
-			firstip = net.ParseIP(firstip.Mask(ipNet.Mask).String()) // get real first IP from cidr
-			rangeConfig.RangeStart = firstip
-		}
-		if rangeConfig.RangeStart != nil && !ipNet.Contains(rangeConfig.RangeStart) {
-			return nil, fmt.Errorf("range_start IP %s not in IP Range %s",
-				rangeConfig.RangeStart.String(),
-				rangeConfig.Range)
-		}
-		if rangeConfig.RangeEnd == nil {
-			rangeConfig.RangeEnd = lastIP(ipNet)
-		}
-		if rangeConfig.RangeEnd != nil && !ipNet.Contains(rangeConfig.RangeEnd) {
-			return nil, fmt.Errorf("range_end IP %s not in IP Range %s",
-				rangeConfig.RangeEnd.String(),
-				rangeConfig.Range)
-		}
-
-		n.IPAM.IPRanges[idx] = rangeConfig
 	}
 
 	// set network namespace
