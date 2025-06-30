@@ -85,7 +85,7 @@ func (c *ipPoolClient) Get(ctx context.Context) (*vmv1.IPPool, error) {
 		},
 		Spec: vmv1.IPPoolSpec{
 			Range:       c.rangeConfig.Range,
-			Managed:     make(map[netip.Addr]struct{}),
+			Managed:     make(map[string]vmv1.Empty),
 			Allocations: nil,
 		},
 	}

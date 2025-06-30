@@ -11,6 +11,7 @@ import (
 	"github.com/Jille/contextcond"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	v1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
@@ -212,12 +213,20 @@ func NewManager(ctx context.Context, cfg *IPAMManagerConfig, poolClient *ipPoolC
 		pool: poolClient,
 
 		allocations:   make(map[VMID]netip.Addr),
-		unknown:       pool.Spec.Managed,
+		unknown:       make(map[netip.Addr]struct{}),
 		free:          nil,
 		cooldownQueue: nil,
 
 		rebalanceCondition: nil,
 		mu:                 sync.Mutex{},
+	}
+
+	for ip := range pool.Spec.Managed {
+		ip, err := netip.ParseAddr(ip)
+		if err != nil {
+			return nil, fmt.Errorf("invalid IP in pool: %w", err)
+		}
+		m.unknown[ip] = struct{}{}
 	}
 
 	m.rebalanceCondition = contextcond.NewCond(&m.mu)
@@ -253,7 +262,7 @@ func (m *Manager) rebalance(ctx context.Context) error {
 	// We have too many IPs
 	if len(m.free) > m.cfg.HighIPCount {
 		for _, ip := range m.free[m.cfg.TargetIPCount:] {
-			delete(pool.Spec.Managed, ip)
+			delete(pool.Spec.Managed, ip.String())
 		}
 
 		newFree = m.free[:m.cfg.TargetIPCount]
@@ -263,7 +272,7 @@ func (m *Manager) rebalance(ctx context.Context) error {
 		newFree = append(newFree, m.free...)
 		for ip := range m.pool.AllIPs() {
 			newFree = append(newFree, ip)
-			pool.Spec.Managed[ip] = struct{}{}
+			pool.Spec.Managed[ip.String()] = v1.Empty{}
 		}
 	}
 

@@ -9,13 +9,16 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// Empty represents an empty struct for use in sets/maps
+type Empty struct{}
+
 // IPPoolSpec defines the desired state of IPPool
 type IPPoolSpec struct {
 	// Range is a RFC 4632/4291-style string that represents an IP address and prefix length in CIDR notation
 	Range string `json:"range"`
 
 	// Managed is the set of IPs that are managed by the IPAM manager.
-	Managed map[netip.Addr]struct{} `json:"managed"`
+	Managed map[string]Empty `json:"managed"`
 
 	// Deprecated: This field is deprecated and will be removed in a future version.
 	// Allocations is the set of allocated IPs for the given range. Its` indices are a direct mapping to the
@@ -36,7 +39,7 @@ func (a *IPPoolSpec) Normalize() error {
 		return nil
 	}
 
-	a.Managed = make(map[netip.Addr]struct{})
+	a.Managed = make(map[string]Empty)
 
 	ip, _, err := net.ParseCIDR(a.Range)
 	if err != nil {
@@ -59,7 +62,7 @@ func (a *IPPoolSpec) Normalize() error {
 			return fmt.Errorf("invalid ip: %s", ip)
 		}
 
-		a.Managed[ip] = struct{}{}
+		a.Managed[ip.String()] = Empty{}
 	}
 
 	return nil
