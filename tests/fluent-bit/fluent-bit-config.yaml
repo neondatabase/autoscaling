@@ -25,6 +25,7 @@ data:
 
     @INCLUDE input-kubernetes.conf
     @INCLUDE filter-kubernetes.conf
+    @INCLUDE filter-lua.conf
     @INCLUDE filter-rewrite-tag.conf
     @INCLUDE output-file.conf
 
@@ -53,7 +54,14 @@ data:
         K8S-Logging.Parser On
         K8S-Logging.Exclude Off
         # Optionally turn On to include annotations
-        Annotations       Off
+        Annotations       On
+
+  filter-lua.conf: |
+    [FILTER]
+        Name              lua
+        Match             kube.*
+        Script            add_timestamp.lua
+        Call              add_timestamp
 
   filter-rewrite-tag.conf: |
     [FILTER]
@@ -65,7 +73,7 @@ data:
         # ^(.+)$ - Regex matching any non-empty pod name (captures it).
         # pod.$1 - The new tag format. $1 is the captured pod name.
         # Keep - Keep the original record after rewriting the tag.
-        Rule  $kubernetes['pod_name'] ^(.+)$ pod.$1 true
+        Rule  $kubernetes['pod_name'] ^(.+)$ pod.$pod_timestamp.$1 true
         Emitter_Name re_emitted
 
   output-file.conf: |
@@ -96,3 +104,20 @@ data:
         Regex             ^(?<time>[^ ]+) (?<stream>stdout|stderr) (?<logtag>[^ ]*) (?<log>.*)$
         Time_Key          time
         Time_Format       %Y-%m-%dT%H:%M:%S.%L%z 
+
+  add_timestamp.lua: |
+    -- Global table to store first timestamp per pod
+    pod_timestamps = pod_timestamps or {}
+
+    function add_timestamp(tag, timestamp, record)
+        local pod_name = record["kubernetes"]["pod_name"]
+
+        -- If we haven't seen this pod before, store its first timestamp  
+        if not pod_timestamps[pod_name] then
+            pod_timestamps[pod_name] = os.date("%y-%m-%d.%H-%M-%S", timestamp)
+        end
+
+        -- Use the stored timestamp for this pod
+        record["pod_timestamp"] = pod_timestamps[pod_name]
+        return 1, timestamp, record
+    end
