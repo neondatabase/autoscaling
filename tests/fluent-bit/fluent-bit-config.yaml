@@ -114,7 +114,7 @@ data:
         
         -- If we haven't seen this pod before, store its first timestamp  
         if not pod_timestamps[pod_name] then
-            pod_timestamps[pod_name] = os.date("%Y%m%d_%H%M%S", timestamp)
+            pod_timestamps[pod_name] = os.date("%y-%m-%d.%H-%M-%S", timestamp)
         end
         
         -- Use the stored timestamp for this pod
