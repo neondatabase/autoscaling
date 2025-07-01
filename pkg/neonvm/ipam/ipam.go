@@ -119,7 +119,7 @@ func FromClient(kClient *Client, params IPAMParams) (*IPAM, error) {
 			return nil, fmt.Errorf("error creating pool client: %w", err)
 		}
 
-		manager, err := NewManager(ctx, ipamConfig.ManagerConfig, poolClient)
+		manager, err := NewManager(ctx, time.Now, ipamConfig.ManagerConfig, poolClient)
 		if err != nil {
 			return nil, fmt.Errorf("error creating manager: %w", err)
 		}

@@ -61,7 +61,7 @@ func newManagerTest(t *testing.T) *managerTest {
 	logger := testr.New(t)
 	ctx := log.IntoContext(context.Background(), logger)
 
-	manager, err := ipam.NewManager(ctx, managerCfg, poolClient)
+	manager, err := ipam.NewManager(ctx, time.Now, managerCfg, poolClient)
 	require.NoError(t, err)
 
 	metrics.AddManager(manager)

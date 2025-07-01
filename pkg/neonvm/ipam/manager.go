@@ -71,7 +71,7 @@ type Manager struct {
 	unknown       map[netip.Addr]struct{}
 	cooldownQueue []CooldownEntry
 
-	// Acquired for every public method
+	now                func() time.Time
 	rebalanceCondition *contextcond.Cond
 	mu                 sync.Mutex
 }
@@ -81,7 +81,7 @@ type CooldownEntry struct {
 	deadline time.Time
 }
 
-func NewManager(ctx context.Context, cfg *IPAMManagerConfig, poolClient *PoolClient) (*Manager, error) {
+func NewManager(ctx context.Context, now func() time.Time, cfg *IPAMManagerConfig, poolClient *PoolClient) (*Manager, error) {
 	if err := cfg.Normalize(); err != nil {
 		return nil, err
 	}
@@ -100,6 +100,7 @@ func NewManager(ctx context.Context, cfg *IPAMManagerConfig, poolClient *PoolCli
 		free:          nil,
 		cooldownQueue: nil,
 
+		now:                now,
 		rebalanceCondition: nil,
 		mu:                 sync.Mutex{},
 	}
@@ -193,28 +194,24 @@ func (m *Manager) startCooldown(ip netip.Addr) {
 	m.cooldownQueue = append(m.cooldownQueue,
 		CooldownEntry{
 			ip:       ip,
-			deadline: time.Now().Add(m.cfg.cooldownPeriod),
+			deadline: m.now().Add(m.cfg.cooldownPeriod),
 		},
 	)
-	fmt.Println("startCooldown", ip, m.cfg.cooldownPeriod)
 
 	m.finishCooldown()
 }
 
 func (m *Manager) finishCooldown() {
-	fmt.Println("finishCooldown", len(m.cooldownQueue))
-	now := time.Now()
+	now := m.now()
 	for len(m.cooldownQueue) > 0 {
 		head := m.cooldownQueue[0]
 		if head.deadline.After(now) {
 			return
 		}
-		fmt.Println("finishCooldown", head.ip)
 
 		m.free = append(m.free, head.ip)
 		m.cooldownQueue = m.cooldownQueue[1:]
 	}
-
 }
 
 func (m *Manager) SetActive(active map[netip.Addr]VMID) {
@@ -323,7 +320,6 @@ func (m *Manager) rebalance(ctx context.Context) error {
 func (m *Manager) ipCountMetric() []metricfunc.MetricValue {
 	var result []metricfunc.MetricValue
 	add := func(state string, value int) {
-		// fmt.Println("add", state, value)
 		result = append(result, metricfunc.MetricValue{
 			Labels: prometheus.Labels{PoolLabel: m.pool.PoolName(), StateLabel: state},
 			Value:  float64(value),
