@@ -6,9 +6,9 @@ WORKDIR /build
 RUN set -e \
     && echo "Build linux kernel ${KERNEL_VERSION}" \
     && test -n "${KERNEL_VERSION}" \
-    && echo "force this as a requirement for build-deps" > /build/arg-check-succeeded
+    && echo "force this as a requirement for build-kernel-deps" > /build/arg-check-succeeded
 
-FROM ubuntu:24.04@sha256:72297848456d5d37d1262630108ab308d3e9ec7ed1c3286a32fe09856619a782 AS build-deps
+FROM ubuntu:24.04@sha256:72297848456d5d37d1262630108ab308d3e9ec7ed1c3286a32fe09856619a782 AS build-kernel-deps
 WORKDIR /build
 
 RUN apt-get update && apt-get -y install \
@@ -54,37 +54,71 @@ RUN set -e \
     && cd linux-${KERNEL_VERSION} \
     && for f in $(ls -1 ../patches | sort); do echo "Applying $f..."; patch -p1 < ../patches/$f; done
 
+FROM build-kernel-deps AS build-tools-deps
+RUN apt-get update && apt-get install -y \
+    clang \
+    llvm-dev \
+    libdw-dev \
+    libslang2-dev \
+    libbfd-dev \
+    libiberty-dev \
+    libcap-dev \
+    libunwind-dev \
+    zlib1g-dev \
+    libzstd-dev \
+    liblzma-dev \
+    libaio-dev \
+    libtraceevent-dev \
+    libpfm4-dev \
+    systemtap-sdt-dev \
+    musl \
+    musl-dev \
+    musl-tools \
+    pkg-config
 
 ### Cross-compilation related steps
 
 # Build the kernel on amd64
-FROM build-deps AS build_amd64
+FROM build-kernel-deps AS build_kernel_amd64
 ARG KERNEL_VERSION
 ADD linux-config-amd64-${KERNEL_VERSION} linux-${KERNEL_VERSION}/.config
 ARG VERSION_SUFFIX
 RUN cd linux-${KERNEL_VERSION} \
-	&& make ARCH=x86_64 CROSS_COMPILE=x86_64-linux-gnu- EXTRAVERSION="$VERSION_SUFFIX" -j `nproc`
+    && make ARCH=x86_64 CROSS_COMPILE=x86_64-linux-gnu- EXTRAVERSION="$VERSION_SUFFIX" -j `nproc`
+
+FROM build-tools-deps AS build_tools_amd64
+ARG KERNEL_VERSION
+ADD linux-config-amd64-${KERNEL_VERSION} linux-${KERNEL_VERSION}/.config
+RUN cd linux-${KERNEL_VERSION}/tools/perf \
+    && make ARCH=x86_64 CROSS_COMPILE=x86_64-linux-gnu- LDFLAGS="-static -L/usr/lib/x86_64-linux-gnu -Wl,--whole-archive -lzstd -Wl,--no-whole-archive" NO_LIBPERL=1 NO_GTK2=1 NO_SDT=1 NO_JEVENTS=1
 
 # Copy the kernel image to a separate step
 # Use alpine so that `cp` is available when loading custom kernels for the runner pod.
 # See the neonvm controller's pod creation logic for more detail.
 FROM --platform=linux/amd64 alpine:3.19.7@sha256:e5d0aea7f7d2954678a9a6269ca2d06e06591881161961ea59e974dff3f12377 AS kernel_amd64
 ARG KERNEL_VERSION
-COPY --from=build_amd64 /build/linux-${KERNEL_VERSION}/arch/x86/boot/bzImage /vmlinuz
+COPY --from=build_kernel_amd64 /build/linux-${KERNEL_VERSION}/arch/x86/boot/bzImage /vmlinuz
+COPY --from=build_tools_amd64 /build/linux-${KERNEL_VERSION}/tools/perf/perf /tools/perf
 
 # Build the kernel on arm64
-FROM build-deps AS build_arm64
+FROM build-kernel-deps AS build_kernel_arm64
 ARG KERNEL_VERSION
 ADD linux-config-aarch64-${KERNEL_VERSION} linux-${KERNEL_VERSION}/.config
 RUN cd linux-${KERNEL_VERSION} \
-	&& make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- EXTRAVERSION="$VERSION_SUFFIX" -j `nproc`
+    && make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- EXTRAVERSION="$VERSION_SUFFIX" -j `nproc`
+
+FROM build-tools-deps AS build_tools_arm64
+ARG KERNEL_VERSION
+RUN cd linux-${KERNEL_VERSION}/tools/perf \
+    && make LDFLAGS="-static -L/usr/lib/aarch64-linux-gnu -Wl,--whole-archive -lzstd -Wl,--no-whole-archive" NO_LIBPERL=1 NO_GTK2=1 NO_SDT=1 NO_JEVENTS=1
 
 # Copy the kernel image to a separate step
 # Use alpine so that `cp` is available when loading custom kernels for the runner pod.
 # See the neonvm controller's pod creation logic for more detail.
 FROM --platform=linux/arm64 alpine:3.19.7@sha256:e5d0aea7f7d2954678a9a6269ca2d06e06591881161961ea59e974dff3f12377 AS kernel_arm64
 ARG KERNEL_VERSION
-COPY --from=build_arm64 /build/linux-${KERNEL_VERSION}/arch/arm64/boot/Image /vmlinuz
+COPY --from=build_kernel_arm64 /build/linux-${KERNEL_VERSION}/arch/arm64/boot/Image /vmlinuz
+COPY --from=build_tools_arm64 /build/linux-${KERNEL_VERSION}/tools/perf/perf /tools/perf
 
 # Dummy default target without target architecture
 FROM alpine:3.19.7@sha256:e5d0aea7f7d2954678a9a6269ca2d06e06591881161961ea59e974dff3f12377
