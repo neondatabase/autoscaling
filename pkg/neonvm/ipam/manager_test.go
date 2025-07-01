@@ -28,15 +28,14 @@ type managerTest struct {
 	t   *testing.T
 	ctx context.Context
 
-	steps    []managerTestStep
 	vmStates map[types.UID]*vmState
 	ipStates map[string]*ipState
-	timer    *helpers.FakeClock
+	clock    *helpers.FakeClock
 }
 
 func newManagerTest(t *testing.T) *managerTest {
 	managerCfg := &ipam.IPAMManagerConfig{
-		CooldownPeriod: "10s",
+		CooldownPeriod: "70s",
 		HighIPCount:    100,
 		LowIPCount:     50,
 		TargetIPCount:  75,
@@ -60,7 +59,9 @@ func newManagerTest(t *testing.T) *managerTest {
 	logger := testr.New(t)
 	ctx := log.IntoContext(context.Background(), logger)
 
-	manager, err := ipam.NewManager(ctx, time.Now, managerCfg, poolClient)
+	clock := helpers.NewFakeClock(t)
+
+	manager, err := ipam.NewManager(ctx, clock.Now, managerCfg, poolClient)
 	require.NoError(t, err)
 
 	metrics.AddManager(manager)
@@ -72,27 +73,41 @@ func newManagerTest(t *testing.T) *managerTest {
 		t:   t,
 		ctx: ctx,
 
-		steps:    make([]managerTestStep, 0),
 		vmStates: make(map[types.UID]*vmState),
 		ipStates: make(map[string]*ipState),
-		timer:    helpers.NewFakeClock(t),
+		clock:    clock,
 	}
 }
 
-func (m *managerTest) addSteps(vmCount int, sleepCount int) {
-	steps := make([]managerTestStep, 0, 2*vmCount+sleepCount)
-	for i := 0; i < vmCount; i++ {
+func generateAcquire(vmIDfrom, vmIDto int, actionsFrom, actionsTo int) []managerTestStep {
+	var steps []managerTestStep
+	for i := vmIDfrom; i < vmIDto; i++ {
 		uid := types.UID(fmt.Sprintf("vm-%d", i)) // This is not a real UUID, but it is not a problem.
-		steps = append(steps, managerTestStep{action: acquire, vmID: uid, sleep: 0})
-		steps = append(steps, managerTestStep{action: acquire, vmID: uid, sleep: 0})
-	}
-	for i := 0; i < sleepCount; i++ {
-		steps = append(steps, managerTestStep{action: sleep, sleep: 1 * time.Second, vmID: ""})
+
+		for j := 0; j < rand.IntN(actionsTo-actionsFrom)+actionsFrom; j++ {
+			steps = append(steps, managerTestStep{action: acquire, vmID: uid, sleep: 0})
+		}
 	}
 
 	rand.Shuffle(len(steps), func(i, j int) {
 		steps[i], steps[j] = steps[j], steps[i]
 	})
+
+	return steps
+}
+
+func generateRelease(vmIDmin, vmIDmax int) []managerTestStep {
+	steps := generateAcquire(vmIDmin, vmIDmax, 1, 2)
+
+	for i := range steps {
+		steps[i].action = release
+	}
+
+	return steps
+}
+
+func generateAcquireRelease(vmIDfrom, vmIDto int, actionsFrom, actionsTo int) []managerTestStep {
+	steps := generateAcquire(vmIDfrom, vmIDto, actionsFrom, actionsTo)
 
 	// Iterate in reverse to mark last step for each VM as release
 	released := make(map[types.UID]struct{})
@@ -107,7 +122,7 @@ func (m *managerTest) addSteps(vmCount int, sleepCount int) {
 		steps[i].action = release
 	}
 
-	m.steps = append(m.steps, steps...)
+	return steps
 }
 
 type testAction string
@@ -133,51 +148,56 @@ type ipState struct {
 	cooldownDeadline time.Time
 }
 
-func (m *managerTest) run() {
-	for _, step := range m.steps {
+func (m *managerTest) run(steps []managerTestStep) {
+	for _, step := range steps {
 		switch step.action {
 		case acquire:
 			ip, err := m.manager.Allocate(m.ctx, types.UID(step.vmID))
 			if err != nil {
 				m.t.Fatalf("failed to acquire IP: %v", err)
 			}
-			state := m.ipStates[ip.String()]
-			if state == nil {
-				state = &ipState{
+
+			ipSt := m.ipStates[ip.String()]
+			if ipSt == nil {
+				ipSt = &ipState{
 					vmID:             "",
 					cooldownDeadline: time.Time{},
 				}
-				m.ipStates[ip.String()] = state
+				m.ipStates[ip.IP.String()] = ipSt
 			}
-			if state.vmID != "" {
-				m.t.Fatalf("IP %s is already allocated to %s", ip.String(), state.vmID)
+			if ipSt.vmID != "" && ipSt.vmID != step.vmID {
+				m.t.Fatalf("IP %s is already allocated to %s", ip.String(), ipSt.vmID)
 			}
-			if state.cooldownDeadline.After(m.timer.Now()) {
+			if ipSt.cooldownDeadline.After(m.clock.Now()) {
 				m.t.Fatalf("cooldown deadline not met for %s", step.vmID)
 			}
-			state.vmID = step.vmID
-			state.cooldownDeadline = m.timer.Now().Add(step.sleep)
+			ipSt.vmID = step.vmID
 
-			otherState := m.vmStates[step.vmID]
-			if otherState == nil {
-				otherState = &vmState{
+			vmSt := m.vmStates[step.vmID]
+			if vmSt == nil {
+				vmSt = &vmState{
 					ip: net.IP{},
 				}
-				m.vmStates[step.vmID] = otherState
+				m.vmStates[step.vmID] = vmSt
 			}
-			otherState.ip = ip.IP
+			vmSt.ip = ip.IP
 
 		case release:
-			state := m.vmStates[step.vmID]
-			if state == nil {
+			vmSt := m.vmStates[step.vmID]
+			if vmSt == nil {
 				m.t.Fatalf("VM %s is not allocated", step.vmID)
 			}
-			err := m.manager.Release(m.ctx, step.vmID, state.ip)
+			err := m.manager.Release(m.ctx, step.vmID, vmSt.ip)
 			if err != nil {
 				m.t.Fatalf("failed to release IP: %v", err)
 			}
+
+			ipSt := m.ipStates[vmSt.ip.String()]
+			ipSt.vmID = ""
+			ipSt.cooldownDeadline = m.clock.Now().Add(time.Second * 10)
+
 		case sleep:
-			m.timer.Inc(step.sleep)
+			m.clock.Inc(step.sleep)
 		}
 	}
 }
@@ -223,9 +243,6 @@ func (m *managerTest) collectMetrics() []managerMetricValue {
 
 func TestManager(t *testing.T) {
 	manager := newManagerTest(t)
-	manager.addSteps(10, 10)
-
-	manager.t.Logf("steps: %v", manager.steps)
 
 	metrics := manager.collectMetrics()
 	assert.ElementsMatch(t, []managerMetricValue{
@@ -233,10 +250,13 @@ func TestManager(t *testing.T) {
 		{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "free", Count: 0},
 		{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "unknown", Count: 0},
 		{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "cooldown", Count: 0},
+
 		{Name: "ipam_pool_ip_count", Pool: "test-10.100.0.0-16", State: "total", Count: 65535},
 	}, metrics)
 
-	manager.run()
+	steps := generateAcquireRelease(0, 10, 2, 5)
+	manager.t.Logf("steps: %v", steps)
+	manager.run(steps)
 
 	metrics = manager.collectMetrics()
 	assert.ElementsMatch(t, []managerMetricValue{
@@ -246,6 +266,71 @@ func TestManager(t *testing.T) {
 		{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "cooldown", Count: 10},
 
 		{Name: "ipam_pool_ip_count", Pool: "test-10.100.0.0-16", State: "managed", Count: 50},
+		{Name: "ipam_pool_ip_count", Pool: "test-10.100.0.0-16", State: "total", Count: 65535},
+	}, metrics)
+
+	manager.clock.Inc(100 * time.Second)
+
+	manager.run(generateAcquire(0, 1, 1, 2))
+
+	metrics = manager.collectMetrics()
+	assert.ElementsMatch(t, []managerMetricValue{
+		{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "allocated", Count: 1},
+		{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "free", Count: 49},
+		{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "unknown", Count: 0},
+		{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "cooldown", Count: 0},
+
+		{Name: "ipam_pool_ip_count", Pool: "test-10.100.0.0-16", State: "managed", Count: 50},
+		{Name: "ipam_pool_ip_count", Pool: "test-10.100.0.0-16", State: "total", Count: 65535},
+	}, metrics)
+}
+
+func TestManagerProduction(t *testing.T) {
+	manager := newManagerTest(t)
+
+	computesPerMinute := 600
+	computeLifeTimeMinutes := 5
+
+	minutes := 30
+
+	for minute := 0; minute < minutes; minute++ {
+		fmt.Printf("minute: %d\n", minute)
+
+		if minute < minutes-computeLifeTimeMinutes {
+			steps := generateAcquire(minute*computesPerMinute, (minute+1)*computesPerMinute, 1, 2)
+			manager.run(steps)
+		}
+
+		if minute == 15 {
+			metrics := manager.collectMetrics()
+			assert.ElementsMatch(t, []managerMetricValue{
+				{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "allocated", Count: 3600},
+				{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "free", Count: 0},
+				{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "unknown", Count: 0},
+				{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "cooldown", Count: 600},
+
+				{Name: "ipam_pool_ip_count", Pool: "test-10.100.0.0-16", State: "managed", Count: 4200},
+				{Name: "ipam_pool_ip_count", Pool: "test-10.100.0.0-16", State: "total", Count: 65535},
+			}, metrics)
+		}
+
+		if minute >= computeLifeTimeMinutes {
+			oldMinute := minute - computeLifeTimeMinutes
+			steps := generateRelease(oldMinute*computesPerMinute, (oldMinute+1)*computesPerMinute)
+			manager.run(steps)
+		}
+
+		manager.clock.Inc(time.Minute)
+	}
+
+	metrics := manager.collectMetrics()
+	assert.ElementsMatch(t, []managerMetricValue{
+		{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "allocated", Count: 0},
+		{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "free", Count: 3000},
+		{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "unknown", Count: 0},
+		{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "cooldown", Count: 1200},
+
+		{Name: "ipam_pool_ip_count", Pool: "test-10.100.0.0-16", State: "managed", Count: 4200},
 		{Name: "ipam_pool_ip_count", Pool: "test-10.100.0.0-16", State: "total", Count: 65535},
 	}, metrics)
 }
