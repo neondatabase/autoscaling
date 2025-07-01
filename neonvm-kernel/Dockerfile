@@ -54,7 +54,7 @@ RUN set -e \
     && cd linux-${KERNEL_VERSION} \
     && for f in $(ls -1 ../patches | sort); do echo "Applying $f..."; patch -p1 < ../patches/$f; done
 
-FROM build-kernel-deps AS build-tools-deps-amd64
+FROM build-kernel-deps AS build-tools-deps
 RUN apt-get update && apt-get install -y \
     clang \
     llvm-dev \
@@ -76,42 +76,6 @@ RUN apt-get update && apt-get install -y \
     musl-tools \
     pkg-config
 
-FROM build-kernel-deps AS build-tools-deps-arm64
-RUN dpkg --add-architecture arm64 && \
-    apt-get update && \
-    apt-get -y install \
-    clang \
-    llvm-dev \
-    libdw-dev \
-    libslang2-dev \
-    libbfd-dev \
-    libiberty-dev \
-    libcap-dev \
-    libunwind-dev \
-    zlib1g-dev \
-    libzstd-dev \
-    liblzma-dev \
-    libaio-dev \
-    libtraceevent-dev \
-    libpfm4-dev \
-    systemtap-sdt-dev \
-    musl \
-    musl-dev \
-    musl-tools \
-    pkg-config \
-    libtraceevent-dev:arm64 \
-    libelf-dev:arm64 \
-    libzstd-dev:arm64 \
-    zlib1g-dev:arm64 \
-    libnuma-dev:arm64 \
-    libslang2-dev:arm64 \
-    libdw-dev:arm64 \
-    libperl-dev:arm64 \
-    libbfd-dev:arm64 \
-    libiberty-dev:arm64 \
-    libcap-dev:arm64 \
-    libunwind-dev:arm64
-
 ### Cross-compilation related steps
 
 # Build the kernel on amd64
@@ -122,7 +86,7 @@ ARG VERSION_SUFFIX
 RUN cd linux-${KERNEL_VERSION} \
     && make ARCH=x86_64 CROSS_COMPILE=x86_64-linux-gnu- EXTRAVERSION="$VERSION_SUFFIX" -j `nproc`
 
-FROM build-tools-deps-amd64 AS build_tools_amd64
+FROM build-tools-deps AS build_tools_amd64
 ARG KERNEL_VERSION
 ADD linux-config-amd64-${KERNEL_VERSION} linux-${KERNEL_VERSION}/.config
 RUN cd linux-${KERNEL_VERSION}/tools/perf \
@@ -143,7 +107,7 @@ ADD linux-config-aarch64-${KERNEL_VERSION} linux-${KERNEL_VERSION}/.config
 RUN cd linux-${KERNEL_VERSION} \
     && make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- EXTRAVERSION="$VERSION_SUFFIX" -j `nproc`
 
-FROM build-tools-deps-arm64 AS build_tools_arm64
+FROM build-tools-deps AS build_tools_arm64
 ARG KERNEL_VERSION
 RUN cd linux-${KERNEL_VERSION}/tools/perf \
     && make LDFLAGS="-static -L/usr/lib/aarch64-linux-gnu -Wl,--whole-archive -lzstd -Wl,--no-whole-archive" NO_LIBPERL=1 NO_GTK2=1 NO_SDT=1 NO_JEVENTS=1
