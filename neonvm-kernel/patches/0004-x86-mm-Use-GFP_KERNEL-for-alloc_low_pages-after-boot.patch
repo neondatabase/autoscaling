@@ -1,0 +1,46 @@
+From 34dbe558d9fedb7919a43decf1540e4354039cff Mon Sep 17 00:00:00 2001
+From: Em Sharnoff <sharnoff@neon.tech>
+Date: Sun, 8 Jun 2025 17:43:37 +0100
+Subject: [PATCH 4/5] x86/mm: Use GFP_KERNEL for alloc_low_pages() after boot
+
+Currently it's GFP_ATOMIC. GFP_KERNEL seems more correct.
+
+From Ingo M. [1]
+
+> There's no real reason why it should be GFP_ATOMIC AFAICS, other than
+> some historic inertia that nobody bothered to fix.
+
+and previously Mike R. [2]
+
+> The few callers that effectively use page allocator for the direct map
+> updates are gart_iommu_init() and memory hotplug. Neither of them
+> happen in an atomic context so there is no reason to use GFP_ATOMIC
+> for these allocations.
+>
+> Replace GFP_ATOMIC with GFP_KERNEL to avoid using atomic reserves for
+> allocations that do not require that.
+
+[1]: https://lore.kernel.org/all/aEE6_S2a-1tk1dtI@gmail.com/
+[2]: https://lore.kernel.org/all/20211111110241.25968-5-rppt@kernel.org/
+
+Signed-off-by: Em Sharnoff <sharnoff@neon.tech>
+---
+ arch/x86/mm/init.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/arch/x86/mm/init.c b/arch/x86/mm/init.c
+index 1b3b3a3c09a4..dc38d846786c 100644
+--- a/arch/x86/mm/init.c
++++ b/arch/x86/mm/init.c
+@@ -131,7 +131,7 @@ __ref void *alloc_low_pages(unsigned int num)
+ 		unsigned int order;
+ 
+ 		order = get_order((unsigned long)num << PAGE_SHIFT);
+-		return (void *)__get_free_pages(GFP_ATOMIC | __GFP_ZERO, order);
++		return (void *)__get_free_pages(GFP_KERNEL | __GFP_ZERO, order);
+ 	}
+ 
+ 	if ((pgt_buf_end + num) > pgt_buf_top || !can_use_brk_pgt) {
+-- 
+2.39.5
+

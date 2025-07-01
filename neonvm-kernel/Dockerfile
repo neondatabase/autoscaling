@@ -38,15 +38,21 @@ COPY --from=check-arg /build/arg-check-succeeded arg-check-succeeded
 # This all as of Docker 26.1.4 - 2024-06-07.
 ARG KERNEL_VERSION
 
+COPY echo-source-url.sh echo-source-url.sh
+
 RUN set -e \
     && rm arg-check-succeeded \
     && mkdir -p linux-${KERNEL_VERSION} \
     && echo "downloading linux-${KERNEL_VERSION}.tar.xz" \
-    && MAJOR=`echo ${KERNEL_VERSION} | sed -E 's/^([0-9]+)\.[0-9]+\.[0-9]+$/\1/'` \
-    && curl -sfL https://cdn.kernel.org/pub/linux/kernel/v${MAJOR}.x/linux-${KERNEL_VERSION}.tar.xz -o linux-${KERNEL_VERSION}.tar.xz \
+    && curl -sfL "$(./echo-source-url.sh "${KERNEL_VERSION}")" -o "linux-${KERNEL_VERSION}.tar.xz" \
     && echo "unpacking kernel archive" \
     && tar --strip-components=1 -C linux-${KERNEL_VERSION} -xf linux-${KERNEL_VERSION}.tar.xz
 
+# Apply any patches
+COPY patches patches
+RUN set -e \
+    && cd linux-${KERNEL_VERSION} \
+    && for f in $(ls -1 ../patches | sort); do echo "Applying $f..."; patch -p1 < ../patches/$f; done
 
 
 ### Cross-compilation related steps
@@ -55,7 +61,9 @@ RUN set -e \
 FROM build-deps AS build_amd64
 ARG KERNEL_VERSION
 ADD linux-config-amd64-${KERNEL_VERSION} linux-${KERNEL_VERSION}/.config
-RUN cd linux-${KERNEL_VERSION} && make ARCH=x86_64 CROSS_COMPILE=x86_64-linux-gnu- -j `nproc`
+ARG VERSION_SUFFIX
+RUN cd linux-${KERNEL_VERSION} \
+	&& make ARCH=x86_64 CROSS_COMPILE=x86_64-linux-gnu- EXTRAVERSION="$VERSION_SUFFIX" -j `nproc`
 
 # Copy the kernel image to a separate step
 # Use alpine so that `cp` is available when loading custom kernels for the runner pod.
@@ -68,7 +76,8 @@ COPY --from=build_amd64 /build/linux-${KERNEL_VERSION}/arch/x86/boot/bzImage /vm
 FROM build-deps AS build_arm64
 ARG KERNEL_VERSION
 ADD linux-config-aarch64-${KERNEL_VERSION} linux-${KERNEL_VERSION}/.config
-RUN cd linux-${KERNEL_VERSION} && make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j `nproc`
+RUN cd linux-${KERNEL_VERSION} \
+	&& make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- EXTRAVERSION="$VERSION_SUFFIX" -j `nproc`
 
 # Copy the kernel image to a separate step
 # Use alpine so that `cp` is available when loading custom kernels for the runner pod.

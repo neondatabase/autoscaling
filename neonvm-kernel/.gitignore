@@ -1,1 +1,5 @@
 vmlinuz
+
+# Exclude files for local kernel development.
+# Otherwise certain git operations become unexpectedly very expensive.
+linux/

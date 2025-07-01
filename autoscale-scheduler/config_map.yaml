@@ -15,6 +15,12 @@ data:
           multiPoint:
             enabled:
               - name: AutoscaleEnforcer
+          score:
+            # Score() for some plugins is disabled to avoid conflicts with AutoscaleEnforcer
+            disabled:
+              - name: ImageLocality
+              - name: NodeResourcesBalancedAllocation
+              - name: NodeResourcesFit
 ---
 # TODO: put this in the KubeSchedulerConfiguration's plugin config, rather than a separate configmap
 apiVersion: v1

@@ -6,7 +6,6 @@ apiVersion: vm.neon.tech/v1
 kind: VirtualMachine
 metadata:
   name: example
-# default values for cpuScalingMode and cpuArchitecture
+# default values for cpuScalingMode
 spec:
   cpuScalingMode: QmpScaling
-  targetArchitecture: amd64

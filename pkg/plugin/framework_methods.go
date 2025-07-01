@@ -416,7 +416,7 @@ func (e *AutoscaleEnforcer) NormalizeScore(
 
 	var scoreInfos []scoring
 
-	for _, node := range scores {
+	for i, node := range scores {
 		oldScore := node.Score
 
 		// rand.Intn will panic if we pass in 0
@@ -437,12 +437,13 @@ func (e *AutoscaleEnforcer) NormalizeScore(
 		// We want to pick a score in the range [minScore, score], so use score + 1 - minScore, as
 		// rand.Intn picks a number in the *half open* range [0, n).
 		newScore := minScore + int64(rand.Intn(int(oldScore+1-minScore)))
-		node.Score = newScore
 		scoreInfos = append(scoreInfos, scoring{
 			Node:     node.Name,
 			OldScore: oldScore,
 			NewScore: newScore,
 		})
+
+		scores[i].Score = newScore
 	}
 
 	logger.Info("Randomized Node scores for Pod", zap.Any("scores", scoreInfos))

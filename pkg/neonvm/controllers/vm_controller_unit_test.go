@@ -177,7 +177,6 @@ func TestReconcile(t *testing.T) {
 	var origWithModifiedFields vmv1.VirtualMachine
 	origVM.DeepCopy().DeepCopyInto(&origWithModifiedFields)
 	origWithModifiedFields.Spec.CpuScalingMode = lo.ToPtr(vmv1.CpuScalingModeQMP)
-	origWithModifiedFields.Spec.TargetArchitecture = lo.ToPtr(vmv1.CPUArchitectureAMD64)
 	assert.Equal(t, vm.Spec, origWithModifiedFields.Spec)
 
 	// Round 4
@@ -190,6 +189,7 @@ func TestReconcile(t *testing.T) {
 }
 
 func prettyPrint(t *testing.T, obj any) {
+	t.Helper()
 	s, _ := json.MarshalIndent(obj, "", "\t")
 	t.Logf("%s\n", s)
 }
@@ -296,5 +296,29 @@ func TestNodeAffinity(t *testing.T) {
 		assert.Equal(t, "zoneid", affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[0].MatchExpressions[0].Values[0])
 		assert.Equal(t, "linux", affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[1].MatchExpressions[0].Values[0])
 		assert.Equal(t, "amd64", affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[1].MatchExpressions[1].Values[0])
+	})
+
+	t.Run("no target architecture set, expect only linux affinity", func(t *testing.T) {
+		origVM := defaultVm()
+		affinity := affinityForVirtualMachine(origVM)
+		prettyPrint(t, affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms)
+		assert.Equal(t, 1, len(affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms))
+		assert.Equal(t, "kubernetes.io/os", affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[0].MatchExpressions[0].Key)
+		assert.Equal(t, corev1.NodeSelectorOpIn, affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[0].MatchExpressions[0].Operator)
+		assert.Equal(t, "linux", affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[0].MatchExpressions[0].Values[0])
+	})
+
+	t.Run("target architecture set, expect linux and architecture affinity", func(t *testing.T) {
+		origVM := defaultVm()
+		origVM.Spec.TargetArchitecture = lo.ToPtr(vmv1.CPUArchitectureAMD64)
+		affinity := affinityForVirtualMachine(origVM)
+		prettyPrint(t, affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms)
+		assert.Equal(t, "kubernetes.io/os", affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[0].MatchExpressions[0].Key)
+		assert.Equal(t, corev1.NodeSelectorOpIn, affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[0].MatchExpressions[0].Operator)
+		assert.Equal(t, "linux", affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[0].MatchExpressions[0].Values[0])
+
+		assert.Equal(t, "kubernetes.io/arch", affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[0].MatchExpressions[1].Key)
+		assert.Equal(t, corev1.NodeSelectorOpIn, affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[0].MatchExpressions[1].Operator)
+		assert.Equal(t, "amd64", affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[0].MatchExpressions[1].Values[0])
 	})
 }

@@ -51,7 +51,6 @@ import (
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/api"
-	"github.com/neondatabase/autoscaling/pkg/neonvm/controllers/buildtag"
 	"github.com/neondatabase/autoscaling/pkg/neonvm/ipam"
 	"github.com/neondatabase/autoscaling/pkg/util/gzip64"
 	"github.com/neondatabase/autoscaling/pkg/util/patch"
@@ -126,12 +125,8 @@ func (r *VMReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 		// The object is not being deleted, so if it does not have our finalizer,
 		// then lets add the finalizer and update the object. This is equivalent
 		// registering our finalizer.
-		if !controllerutil.ContainsFinalizer(&vm, virtualmachineFinalizer) {
+		if changed := controllerutil.AddFinalizer(&vm, virtualmachineFinalizer); changed {
 			log.Info("Adding Finalizer for VirtualMachine")
-			if ok := controllerutil.AddFinalizer(&vm, virtualmachineFinalizer); !ok {
-				log.Info("Failed to add finalizer from VirtualMachine")
-				return ctrl.Result{Requeue: true}, nil
-			}
 			if err := r.tryUpdateVM(ctx, &vm); err != nil {
 				log.Error(err, "Failed to update status about adding finalizer to VirtualMachine")
 				return ctrl.Result{}, err
@@ -150,9 +145,12 @@ func (r *VMReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 
 			// remove our finalizer from the list and update it.
 			log.Info("Removing Finalizer for VirtualMachine after successfully perform the operations")
-			if ok := controllerutil.RemoveFinalizer(&vm, virtualmachineFinalizer); !ok {
-				log.Info("Failed to remove finalizer from VirtualMachine")
-				return ctrl.Result{Requeue: true}, nil
+			changed := controllerutil.RemoveFinalizer(&vm, virtualmachineFinalizer)
+			if !changed {
+				// We already checked ContainsFinalizer to go down this code path, so if
+				// RemoveFinalizer doesn't change anything, something has gone quite wrong!
+				err := errors.New("Removing finalizer didn't change VirtualMachine object")
+				return ctrl.Result{}, err
 			}
 			if err := r.tryUpdateVM(ctx, &vm); err != nil {
 				log.Error(err, "Failed to update status about removing finalizer from VirtualMachine")
@@ -168,12 +166,6 @@ func (r *VMReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 	// to a default value.
 	{
 		changed := false
-		// examine targetArchitecture and set it to the default value if it is not set
-		if vm.Spec.TargetArchitecture == nil {
-			log.Info("Setting default target architecture", "default", vmv1.CPUArchitectureAMD64)
-			vm.Spec.TargetArchitecture = lo.ToPtr(vmv1.CPUArchitectureAMD64)
-			changed = true
-		}
 
 		// examine cpuScalingMode and set it to the default value if it is not set
 		if vm.Spec.CpuScalingMode == nil {
@@ -208,11 +200,13 @@ func (r *VMReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 		}
 	}
 
+	requeueAfter := 15 * time.Second
 	// Only quickly requeue if we're scaling or migrating. Otherwise, we aren't expecting any
 	// changes from QEMU, and it's wasteful to repeatedly check.
-	requeueAfter := time.Second
-	if vm.Status.Phase == vmv1.VmPending || vm.Status.Phase == vmv1.VmRunning {
-		requeueAfter = 15 * time.Second
+	if vm.Status.Phase == vmv1.VmScaling ||
+		vm.Status.Phase == vmv1.VmMigrating ||
+		vm.Status.Phase == vmv1.VmPreMigrating {
+		requeueAfter = time.Second
 	}
 
 	return ctrl.Result{RequeueAfter: requeueAfter}, nil
@@ -676,9 +670,10 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 		err := r.Get(ctx, types.NamespacedName{Name: vm.Status.PodName, Namespace: vm.Namespace}, vmRunner)
 		if err == nil {
 			// delete current runner
-			if err := r.deleteRunnerPodIfEnabled(ctx, vmRunner); err != nil {
+			if err := r.Delete(ctx, vmRunner); err != nil {
 				return err
 			}
+			log.Info("VM runner pod was deleted", "Pod.Namespace", vmRunner.Namespace, "Pod.Name", vmRunner.Name)
 		} else if !apierrors.IsNotFound(err) {
 			return err
 		}
@@ -839,24 +834,6 @@ func runnerContainerStatus(pod *corev1.Pod) runnerStatusKind {
 	}
 
 	return runnerRunning
-}
-
-// deleteRunnerPodIfEnabled deletes the runner pod if buildtag.NeverDeleteRunnerPods is false, and
-// then emits an event and log line about what it did, whether it actually deleted the runner pod.
-func (r *VMReconciler) deleteRunnerPodIfEnabled(ctx context.Context, runner *corev1.Pod) error {
-	log := log.FromContext(ctx)
-	var msg string
-	if buildtag.NeverDeleteRunnerPods {
-		msg = fmt.Sprintf("VM runner pod deletion was skipped due to '%s' build tag", buildtag.TagnameNeverDeleteRunnerPods)
-	} else {
-		// delete current runner
-		if err := r.Delete(ctx, runner); err != nil {
-			return err
-		}
-		msg = "VM runner pod was deleted"
-	}
-	log.Info(msg, "Pod.Namespace", runner.Namespace, "Pod.Name", runner.Name)
-	return nil
 }
 
 // updates the values of the runner pod's labels and annotations so that they are exactly equal to
@@ -1178,22 +1155,25 @@ func affinityForVirtualMachine(vm *vmv1.VirtualMachine) *corev1.Affinity {
 	nodeSelector := a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution
 
 	// always add default values (arch==vm.Spec.Affinity or os==linux) even if there are already some values
+	nodeMatchExpressions := []corev1.NodeSelectorRequirement{
+		{
+			Key:      "kubernetes.io/os",
+			Operator: "In",
+			Values:   []string{"linux"},
+		},
+	}
+	if vm.Spec.TargetArchitecture != nil {
+		nodeMatchExpressions = append(nodeMatchExpressions, corev1.NodeSelectorRequirement{
+			Key:      "kubernetes.io/arch",
+			Operator: "In",
+			Values:   []string{string(*vm.Spec.TargetArchitecture)},
+		})
+	}
+
 	nodeSelector.NodeSelectorTerms = append(
 		nodeSelector.NodeSelectorTerms,
 		corev1.NodeSelectorTerm{
-			MatchExpressions: []corev1.NodeSelectorRequirement{
-				{
-					Key:      "kubernetes.io/os",
-					Operator: "In",
-					Values:   []string{"linux"},
-				},
-				{
-					Key:      "kubernetes.io/arch",
-					Operator: "In",
-					// vm.Spec.TargetArchitecture is guaranteed to be set by reconciler loop
-					Values: []string{string(*vm.Spec.TargetArchitecture)},
-				},
-			},
+			MatchExpressions: nodeMatchExpressions,
 		},
 	)
 

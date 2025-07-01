@@ -110,7 +110,6 @@ type VirtualMachineSpec struct {
 
 	ImagePullSecrets []corev1.LocalObjectReference `json:"imagePullSecrets,omitempty"`
 
-	// +kubebuilder:default:=amd64
 	// +optional
 	TargetArchitecture *CPUArchitecture `json:"targetArchitecture,omitempty"`
 

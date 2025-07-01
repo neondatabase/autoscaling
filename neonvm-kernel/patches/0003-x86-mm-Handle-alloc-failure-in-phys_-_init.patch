@@ -1,0 +1,59 @@
+From b4c4df79e193fe8ff7022eab87791a2d226e0e6a Mon Sep 17 00:00:00 2001
+From: Em Sharnoff <sharnoff@neon.tech>
+Date: Thu, 12 Jun 2025 17:06:16 +0100
+Subject: [PATCH 3/5] x86/mm: Handle alloc failure in phys_*_init()
+
+During memory hotplug, allocation failures in phys_*_init() aren't
+handled, which results in a null pointer dereference if they occur.
+
+This patch depends on the previous patch ("x86/mm: Allow error returns
+from phys_*_init()").
+
+Signed-off-by: Em Sharnoff <sharnoff@neon.tech>
+---
+ arch/x86/mm/init_64.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/arch/x86/mm/init_64.c b/arch/x86/mm/init_64.c
+index 7f6f200bb41f..f2048f45d89e 100644
+--- a/arch/x86/mm/init_64.c
++++ b/arch/x86/mm/init_64.c
+@@ -576,6 +576,8 @@ phys_pmd_init(pmd_t *pmd_page, unsigned long paddr, unsigned long paddr_end,
+ 		}
+ 
+ 		pte = alloc_low_page();
++		if (!pte)
++			return -ENOMEM;
+ 		paddr_last = phys_pte_init(pte, paddr, paddr_end, new_prot, init);
+ 
+ 		spin_lock(&init_mm.page_table_lock);
+@@ -670,6 +672,8 @@ phys_pud_init(pud_t *pud_page, unsigned long paddr, unsigned long paddr_end,
+ 		}
+ 
+ 		pmd = alloc_low_page();
++		if (!pmd)
++			return -ENOMEM;
+ 		ret = phys_pmd_init(pmd, paddr, paddr_end,
+ 				    page_size_mask, prot, init);
+ 
+@@ -734,6 +738,8 @@ phys_p4d_init(p4d_t *p4d_page, unsigned long paddr, unsigned long paddr_end,
+ 		}
+ 
+ 		pud = alloc_low_page();
++		if (!pud)
++			return -ENOMEM;
+ 		ret = phys_pud_init(pud, paddr, __pa(vaddr_end),
+ 				    page_size_mask, prot, init);
+ 
+@@ -782,6 +788,8 @@ __kernel_physical_mapping_init(unsigned long paddr_start,
+ 		}
+ 
+ 		p4d = alloc_low_page();
++		if (!p4d)
++			return -ENOMEM;
+ 		ret = phys_p4d_init(p4d, __pa(vaddr), __pa(vaddr_end),
+ 				    page_size_mask, prot, init);
+ 
+-- 
+2.39.5
+

@@ -19,13 +19,10 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	"flag"
 	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -41,7 +38,6 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
@@ -93,65 +89,7 @@ func run(mgr manager.Manager) error {
 }
 
 func main() {
-	var metricsAddr string
-	var enableLeaderElection bool
-	var probeAddr string
-	var concurrencyLimit int
-	var skipUpdateValidationFor map[types.NamespacedName]struct{}
-	var disableRunnerCgroup bool
-	var defaultCpuScalingMode vmv1.CpuScalingMode
-	var qemuDiskCacheSettings string
-	var memhpAutoMovableRatio string
-	var failurePendingPeriod time.Duration
-	var failingRefreshInterval time.Duration
-	var atMostOnePod bool
-	var useVirtioConsole bool
-	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
-	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
-	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
-		"Enable leader election for controller manager. "+
-			"Enabling this will ensure there is only one active controller manager.")
-	flag.IntVar(&concurrencyLimit, "concurrency-limit", 1, "Maximum number of concurrent reconcile operations")
-	flag.Func(
-		"skip-update-validation-for",
-		"Comma-separated list of object names to skip webhook validation, like 'foo' or 'default/bar'",
-		func(value string) error {
-			objSet := make(map[types.NamespacedName]struct{})
-
-			if value != "" {
-				for _, name := range strings.Split(value, ",") {
-					if name == "" {
-						return errors.New("name must not be empty")
-					}
-
-					var namespacedName types.NamespacedName
-					splitBySlash := strings.SplitN(name, "/", 1)
-					if len(splitBySlash) == 1 {
-						namespacedName = types.NamespacedName{Namespace: "default", Name: splitBySlash[0]}
-					} else {
-						namespacedName = types.NamespacedName{Namespace: splitBySlash[0], Name: splitBySlash[1]}
-					}
-					objSet[namespacedName] = struct{}{}
-				}
-			}
-			skipUpdateValidationFor = objSet
-			return nil
-		},
-	)
-	flag.Func("default-cpu-scaling-mode", "Set default cpu scaling mode to use for new VMs", defaultCpuScalingMode.FlagFunc)
-	flag.BoolVar(&disableRunnerCgroup, "disable-runner-cgroup", false, "Disable creation of a cgroup in neonvm-runner for fractional CPU limiting")
-	flag.StringVar(&qemuDiskCacheSettings, "qemu-disk-cache-settings", "cache=none", "Set neonvm-runner's QEMU disk cache settings")
-	flag.StringVar(&memhpAutoMovableRatio, "memhp-auto-movable-ratio", "301", "For virtio-mem, set VM kernel's memory_hotplug.auto_movable_ratio")
-	flag.DurationVar(&failurePendingPeriod, "failure-pending-period", 1*time.Minute,
-		"the period for the propagation of reconciliation failures to the observability instruments")
-	flag.DurationVar(&failingRefreshInterval, "failing-refresh-interval", 1*time.Minute,
-		"the interval between consecutive updates of metrics and logs, related to failing reconciliations")
-	flag.BoolVar(&atMostOnePod, "at-most-one-pod", false,
-		"If true, the controller will ensure that at most one pod is running at a time. "+
-			"Otherwise, the outdated pod might be left to terminate, while the new one is already running.")
-	flag.BoolVar(&useVirtioConsole, "use-virtio-console", false,
-		"If true, the controller will set up the runner to use virtio console instead of serial console.")
-	flag.Parse()
+	cli := getCli()
 
 	logConfig := zap.NewProductionConfig()
 	logConfig.Sampling = nil // Disabling sampling; it's enabled by default for zap's production configs.
@@ -165,15 +103,15 @@ func main() {
 
 	// tune k8s client for manager
 	cfg := ctrl.GetConfigOrDie()
-	cfg.QPS = 1000
-	cfg.Burst = 2000
+	cfg.QPS = float32(cli.k8sClient.qps)
+	cfg.Burst = cli.k8sClient.burst
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme: scheme,
 		Metrics: metricsserver.Options{
-			BindAddress: metricsAddr,
+			BindAddress: cli.metricsAddr,
 		},
-		HealthProbeBindAddress: probeAddr,
-		LeaderElection:         enableLeaderElection,
+		HealthProbeBindAddress: cli.probeAddr,
+		LeaderElection:         cli.leaderElection.enable,
 		LeaderElectionID:       "a3b22509.neon.tech",
 		// LeaderElectionReleaseOnCancel defines if the leader should step down voluntarily
 		// when the Manager ends. This requires the binary to immediately end when the
@@ -184,6 +122,10 @@ func main() {
 		// This option is only safe as long as the program immediately exits after the manager
 		// stops.
 		LeaderElectionReleaseOnCancel: true,
+
+		LeaseDuration: &cli.leaderElection.leaseDuration,
+		RenewDeadline: &cli.leaderElection.renewDeadline,
+		RetryPeriod:   &cli.leaderElection.retryPeriod,
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
@@ -193,17 +135,17 @@ func main() {
 	reconcilerMetrics := controllers.MakeReconcilerMetrics()
 
 	rc := &controllers.ReconcilerConfig{
-		DisableRunnerCgroup:     disableRunnerCgroup,
-		MaxConcurrentReconciles: concurrencyLimit,
-		SkipUpdateValidationFor: skipUpdateValidationFor,
-		QEMUDiskCacheSettings:   qemuDiskCacheSettings,
-		MemhpAutoMovableRatio:   memhpAutoMovableRatio,
-		FailurePendingPeriod:    failurePendingPeriod,
-		FailingRefreshInterval:  failingRefreshInterval,
-		AtMostOnePod:            atMostOnePod,
-		DefaultCPUScalingMode:   defaultCpuScalingMode,
+		DisableRunnerCgroup:     cli.disableRunnerCgroup,
+		MaxConcurrentReconciles: cli.concurrencyLimit,
+		SkipUpdateValidationFor: cli.skipUpdateValidationFor,
+		QEMUDiskCacheSettings:   cli.qemuDiskCacheSettings,
+		MemhpAutoMovableRatio:   cli.memhpAutoMovableRatio,
+		FailurePendingPeriod:    cli.failurePendingPeriod,
+		FailingRefreshInterval:  cli.failingRefreshInterval,
+		AtMostOnePod:            cli.atMostOnePod,
+		DefaultCPUScalingMode:   cli.defaultCpuScalingMode,
 		NADConfig:               controllers.GetNADConfig(),
-		UseVirtioConsole:        useVirtioConsole,
+		UseVirtioConsole:        cli.useVirtioConsole,
 	}
 
 	ipam, err := ipam.New(ipam.IPAMParams{
@@ -212,7 +154,7 @@ func main() {
 
 		// Let's not have more than a quarter of reconcilliation workers stuck
 		// at IPAM mutex.
-		ConcurrencyLimit: max(1, concurrencyLimit/4),
+		ConcurrencyLimit: max(1, cli.concurrencyLimit/4),
 
 		MetricsReg: metrics.Registry,
 	})
