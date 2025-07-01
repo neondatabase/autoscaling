@@ -19,7 +19,6 @@ import (
 	nfake "github.com/neondatabase/autoscaling/neonvm/client/clientset/versioned/fake"
 	helpers "github.com/neondatabase/autoscaling/pkg/agent/core/testhelpers"
 	"github.com/neondatabase/autoscaling/pkg/neonvm/ipam"
-	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
 type managerTest struct {
@@ -30,7 +29,7 @@ type managerTest struct {
 	ctx context.Context
 
 	steps    []managerTestStep
-	vmStates map[string]*vmState
+	vmStates map[types.UID]*vmState
 	ipStates map[string]*ipState
 	timer    *helpers.FakeClock
 }
@@ -74,7 +73,7 @@ func newManagerTest(t *testing.T) *managerTest {
 		ctx: ctx,
 
 		steps:    make([]managerTestStep, 0),
-		vmStates: make(map[string]*vmState),
+		vmStates: make(map[types.UID]*vmState),
 		ipStates: make(map[string]*ipState),
 		timer:    helpers.NewFakeClock(t),
 	}
@@ -83,8 +82,9 @@ func newManagerTest(t *testing.T) *managerTest {
 func (m *managerTest) addSteps(vmCount int, sleepCount int) {
 	steps := make([]managerTestStep, 0, 2*vmCount+sleepCount)
 	for i := 0; i < vmCount; i++ {
-		steps = append(steps, managerTestStep{action: acquire, vmID: fmt.Sprintf("vm-%d", i), sleep: 0})
-		steps = append(steps, managerTestStep{action: acquire, vmID: fmt.Sprintf("vm-%d", i), sleep: 0})
+		uid := types.UID(fmt.Sprintf("vm-%d", i)) // This is not a real UUID, but it is not a problem.
+		steps = append(steps, managerTestStep{action: acquire, vmID: uid, sleep: 0})
+		steps = append(steps, managerTestStep{action: acquire, vmID: uid, sleep: 0})
 	}
 	for i := 0; i < sleepCount; i++ {
 		steps = append(steps, managerTestStep{action: sleep, sleep: 1 * time.Second, vmID: ""})
@@ -95,7 +95,7 @@ func (m *managerTest) addSteps(vmCount int, sleepCount int) {
 	})
 
 	// Iterate in reverse to mark last step for each VM as release
-	released := make(map[string]struct{})
+	released := make(map[types.UID]struct{})
 	for i := len(steps) - 1; i >= 0; i-- {
 		if steps[i].action != acquire {
 			continue
@@ -120,7 +120,7 @@ const (
 
 type managerTestStep struct {
 	action testAction
-	vmID   string
+	vmID   types.UID
 	sleep  time.Duration
 }
 
@@ -129,7 +129,7 @@ type vmState struct {
 }
 
 type ipState struct {
-	vmID             string
+	vmID             types.UID
 	cooldownDeadline time.Time
 }
 
@@ -137,7 +137,7 @@ func (m *managerTest) run() {
 	for _, step := range m.steps {
 		switch step.action {
 		case acquire:
-			ip, err := m.manager.Allocate(m.ctx, vmID(step.vmID))
+			ip, err := m.manager.Allocate(m.ctx, types.UID(step.vmID))
 			if err != nil {
 				m.t.Fatalf("failed to acquire IP: %v", err)
 			}
@@ -172,20 +172,13 @@ func (m *managerTest) run() {
 			if state == nil {
 				m.t.Fatalf("VM %s is not allocated", step.vmID)
 			}
-			err := m.manager.Release(m.ctx, vmID(step.vmID), state.ip)
+			err := m.manager.Release(m.ctx, step.vmID, state.ip)
 			if err != nil {
 				m.t.Fatalf("failed to release IP: %v", err)
 			}
 		case sleep:
 			m.timer.Inc(step.sleep)
 		}
-	}
-}
-
-func vmID(name string) util.NamespacedName {
-	return util.NamespacedName{
-		Namespace: "default",
-		Name:      name,
 	}
 }
 

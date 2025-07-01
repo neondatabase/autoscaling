@@ -12,8 +12,9 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	"k8s.io/apimachinery/pkg/types"
+
 	v1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
-	"github.com/neondatabase/autoscaling/pkg/util"
 	"github.com/neondatabase/autoscaling/pkg/util/metricfunc"
 )
 
@@ -60,13 +61,11 @@ func (c *IPAMManagerConfig) Normalize() error {
 	return nil
 }
 
-type VMID = util.NamespacedName
-
 type Manager struct {
 	cfg  *IPAMManagerConfig
 	pool *PoolClient
 
-	allocations   map[VMID]netip.Addr
+	allocations   map[types.UID]netip.Addr
 	free          []netip.Addr
 	unknown       map[netip.Addr]struct{}
 	cooldownQueue []CooldownEntry
@@ -95,7 +94,7 @@ func NewManager(ctx context.Context, now func() time.Time, cfg *IPAMManagerConfi
 		cfg:  cfg,
 		pool: poolClient,
 
-		allocations:   make(map[VMID]netip.Addr),
+		allocations:   make(map[types.UID]netip.Addr),
 		unknown:       make(map[netip.Addr]struct{}),
 		free:          nil,
 		cooldownQueue: nil,
@@ -118,7 +117,7 @@ func NewManager(ctx context.Context, now func() time.Time, cfg *IPAMManagerConfi
 	return m, nil
 }
 
-func (m *Manager) Allocate(ctx context.Context, vmID VMID) (net.IPNet, error) {
+func (m *Manager) Allocate(ctx context.Context, vmID types.UID) (net.IPNet, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -158,7 +157,7 @@ func (m *Manager) Allocate(ctx context.Context, vmID VMID) (net.IPNet, error) {
 	return m.ipToNet(ip), nil
 }
 
-func (m *Manager) Release(_ context.Context, vmID VMID, ip net.IP) error {
+func (m *Manager) Release(_ context.Context, vmID types.UID, ip net.IP) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -214,7 +213,7 @@ func (m *Manager) finishCooldown() {
 	}
 }
 
-func (m *Manager) SetActive(active map[netip.Addr]VMID) {
+func (m *Manager) SetActive(active map[netip.Addr]types.UID) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 

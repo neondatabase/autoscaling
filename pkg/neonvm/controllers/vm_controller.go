@@ -238,7 +238,7 @@ func (r *VMReconciler) doFinalizerOperationsForVirtualMachine(ctx context.Contex
 			return fmt.Errorf("invalid IP: %s", vm.Status.ExtraNetIP)
 		}
 
-		r.IPAM.ReleaseIP(ctx, types.NamespacedName{Name: vm.Name, Namespace: vm.Namespace}, ip)
+		r.IPAM.ReleaseIP(ctx, vm.UID, ip)
 
 		log.Info(fmt.Sprintf("Released overlay IP %s", ip.String()))
 	}
@@ -301,13 +301,13 @@ func (r *VMReconciler) acquireOverlayIP(ctx context.Context, vm *vmv1.VirtualMac
 	}
 
 	log := log.FromContext(ctx)
-	ip, err := r.IPAM.AcquireIP(ctx, types.NamespacedName{Name: vm.Name, Namespace: vm.Namespace})
+	ip, err := r.IPAM.AcquireIP(ctx, vm.UID)
 	if err != nil {
 		return err
 	}
 	vm.Status.ExtraNetIP = ip.String()
 	vm.Status.ExtraNetMask = fmt.Sprintf("%d.%d.%d.%d", ip.Mask[0], ip.Mask[1], ip.Mask[2], ip.Mask[3])
-	log.Info(fmt.Sprintf("Acquired IP %s for overlay network interface", ip.String()))
+	log.Info("Acquired overlay IP", "IP", ip.String(), "mask", vm.Status.ExtraNetMask)
 	return nil
 }
 

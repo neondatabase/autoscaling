@@ -131,10 +131,7 @@ func TestIPAM(t *testing.T) {
 	params := makeIPAM(t, DefaultIPAMConfig)
 	ipam := params.ipam
 
-	name := types.NamespacedName{
-		Namespace: "default",
-		Name:      "vm",
-	}
+	name := types.UID("vm1")
 
 	ip1, err := ipam.AcquireIP(ctx(t), name)
 	require.NoError(t, err)
@@ -148,7 +145,7 @@ func TestIPAM(t *testing.T) {
 	assert.Equal(t, ip1, ipResult)
 
 	// Different VM - different IP
-	name.Name = "vm2"
+	name = types.UID("vm2")
 	ip2, err := ipam.AcquireIP(ctx(t), name)
 	require.NoError(t, err)
 	require.NotNil(t, ip2)
@@ -158,7 +155,7 @@ func TestIPAM(t *testing.T) {
 	ipam.ReleaseIP(ctx(t), name, net.ParseIP("10.100.123.2"))
 
 	// Allocate one more IP
-	name.Name = "vm3"
+	name = types.UID("vm3")
 	ip3, err := ipam.AcquireIP(ctx(t), name)
 	require.NoError(t, err)
 	require.NotNil(t, ip3)
@@ -181,10 +178,7 @@ func TestIPAMMetricsOnError(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	name := types.NamespacedName{
-		Namespace: "default",
-		Name:      "vm",
-	}
+	name := types.UID("vm1")
 
 	// This should fail because the context is already canceled
 	_, err := ipam.AcquireIP(ctx, name)

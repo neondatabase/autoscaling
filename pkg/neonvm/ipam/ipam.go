@@ -145,12 +145,12 @@ const (
 )
 
 // AcquireIP is idempotent - can be called multiple times with the same vmName.
-func (i *IPAM) AcquireIP(ctx context.Context, vmName types.NamespacedName) (net.IPNet, error) {
+func (i *IPAM) AcquireIP(ctx context.Context, vmID types.UID) (net.IPNet, error) {
 	var ip net.IPNet
 
 	err := i.runIPAMMetered(ctx, IPAMAcquire, func(manager *Manager) error {
 		var err error
-		ip, err = manager.Allocate(ctx, VMID(vmName))
+		ip, err = manager.Allocate(ctx, vmID)
 		return err
 	})
 	if err != nil {
@@ -160,12 +160,12 @@ func (i *IPAM) AcquireIP(ctx context.Context, vmName types.NamespacedName) (net.
 }
 
 // ReleaseIP is not idempotent - have to be called exactly once after the VM state was updated.
-func (i *IPAM) ReleaseIP(ctx context.Context, vmName types.NamespacedName, ip net.IP) {
+func (i *IPAM) ReleaseIP(ctx context.Context, vmID types.UID, ip net.IP) {
 	err := i.runIPAMMetered(ctx, IPAMRelease, func(manager *Manager) error {
-		return manager.Release(ctx, VMID(vmName), ip)
+		return manager.Release(ctx, vmID, ip)
 	})
 	if err != nil {
-		log.FromContext(ctx).Error(err, "failed to release IP", "vmName", vmName, "ip", ip)
+		log.FromContext(ctx).Error(err, "failed to release IP", "vmID", vmID, "ip", ip)
 		// We can only log the error, because method is not failable.
 		// If it ever happens - it means we have a bug.
 	}
@@ -223,7 +223,7 @@ func (i *IPAM) doSetActive(ctx context.Context) error {
 		return fmt.Errorf("failed to get VMs: %w", err)
 	}
 
-	active := make(map[netip.Addr]VMID)
+	active := make(map[netip.Addr]types.UID)
 	for _, vm := range vmList {
 		if len(vm.Status.ExtraNetIP) == 0 {
 			continue
@@ -233,10 +233,7 @@ func (i *IPAM) doSetActive(ctx context.Context) error {
 			return fmt.Errorf("failed to parse IP %s: %w", vm.Status.ExtraNetIP, err)
 		}
 
-		active[ip] = VMID{
-			Namespace: vm.Namespace,
-			Name:      vm.Name,
-		}
+		active[ip] = vm.UID
 	}
 
 	for _, manager := range i.managers {
