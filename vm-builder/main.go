@@ -71,6 +71,7 @@ var (
 	dstImage  = flag.String("dst", "", `Docker image with resulting disk image: --dst=vm-alpine:3.19`)
 	size      = flag.String("size", "1G", `Size for disk image: --size=1G`)
 	outFile   = flag.String("file", "", `Save disk image as file: --file=vm-alpine.qcow2`)
+	buildArgs = MultiStringFlag("build-arg", "Docker build-args to use during the build (multiple allowed)")
 	specFile  = flag.String("spec", "", `File containing additional customization: --spec=spec.yaml`)
 	quiet     = flag.Bool("quiet", false, `Show less output from the docker build process`)
 	forcePull = flag.Bool("pull", false, `Pull src image even if already present locally`)
@@ -381,13 +382,22 @@ func main() {
 		}
 	}
 
-	buildArgs := make(map[string]*string)
-	buildArgs["DISK_SIZE"] = size
-	buildArgs["TARGET_ARCH"] = targetArch
+	finalBuildArgs := make(map[string]*string)
+	finalBuildArgs["VM_BUILDER_DISK_SIZE"] = size
+	finalBuildArgs["VM_BUILDER_TARGET_ARCH"] = targetArch
+	for _, arg := range *buildArgs {
+		kv := strings.SplitN(arg, "=", 2)
+		if len(kv) != 2 {
+			log.Fatalf("unexpected build arg %q, must have \"key=value\" syntax")
+		}
+
+		finalBuildArgs[kv[0]] = &kv[1]
+	}
+
 	opt := types.ImageBuildOptions{
 		AuthConfigs:    authConfigs,
 		Tags:           []string{dstIm},
-		BuildArgs:      buildArgs,
+		BuildArgs:      finalBuildArgs,
 		SuppressOutput: *quiet,
 		NoCache:        false,
 		Context:        tarBuffer,
