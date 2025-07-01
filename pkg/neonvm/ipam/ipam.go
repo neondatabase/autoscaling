@@ -106,13 +106,15 @@ func FromClient(kClient *Client, params IPAMParams) (*IPAM, error) {
 		return nil, fmt.Errorf("network-attachment-definition %s has no manager config", nad.Name)
 	}
 
+	metrics := NewIPAMMetrics(params.MetricsReg)
+
 	var managers []*Manager
 	for _, rangeConfig := range ipamConfig.IPRanges {
 		err := rangeConfig.Normalize()
 		if err != nil {
 			return nil, fmt.Errorf("invalid IP range %s: %w", rangeConfig.Range, err)
 		}
-		poolClient, err := NewPoolClient(kClient.VMClient, &rangeConfig, types.NamespacedName{Name: params.NadName, Namespace: params.NadNamespace})
+		poolClient, err := NewPoolClient(kClient.VMClient, &rangeConfig, types.NamespacedName{Name: params.NadName, Namespace: params.NadNamespace}, metrics)
 		if err != nil {
 			return nil, fmt.Errorf("error creating pool client: %w", err)
 		}
@@ -122,12 +124,13 @@ func FromClient(kClient *Client, params IPAMParams) (*IPAM, error) {
 			return nil, fmt.Errorf("error creating manager: %w", err)
 		}
 		managers = append(managers, manager)
+		metrics.AddManager(manager)
 	}
 
 	return &IPAM{
 		Config:   *ipamConfig,
 		Client:   *kClient,
-		metrics:  NewIPAMMetrics(params.MetricsReg),
+		metrics:  metrics,
 		managers: managers,
 	}, nil
 }

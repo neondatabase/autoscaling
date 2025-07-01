@@ -17,14 +17,20 @@ type PoolClient struct {
 	vmClient    neonvm.Interface
 	rangeConfig *RangeConfiguration
 	network     types.NamespacedName
+	metrics     *IPAMMetrics
 }
 
-func NewPoolClient(vmClient neonvm.Interface, rangeConfig *RangeConfiguration, network types.NamespacedName) (*PoolClient, error) {
-	return &PoolClient{
+func NewPoolClient(vmClient neonvm.Interface, rangeConfig *RangeConfiguration, network types.NamespacedName, metrics *IPAMMetrics) (*PoolClient, error) {
+	c := &PoolClient{
 		vmClient:    vmClient,
 		rangeConfig: rangeConfig,
 		network:     network,
-	}, nil
+		metrics:     metrics,
+	}
+
+	metrics.poolIPCount.WithLabelValues(c.PoolName(), "total").Set(float64(c.rangeConfig.IPCountTotal()))
+
+	return c, nil
 }
 
 func (c *PoolClient) PoolName() string {
@@ -73,5 +79,11 @@ func (c *PoolClient) Get(ctx context.Context) (*vmv1.IPPool, error) {
 
 func (c *PoolClient) Commit(ctx context.Context, pool *vmv1.IPPool) error {
 	_, err := c.vmClient.NeonvmV1().IPPools(c.network.Namespace).Update(ctx, pool, metav1.UpdateOptions{})
+	if err != nil {
+		return fmt.Errorf("error updating IP pool: %w", err)
+	}
+
+	c.metrics.poolIPCount.WithLabelValues(c.PoolName(), "managed").Set(float64(len(pool.Spec.Managed)))
+
 	return err
 }
