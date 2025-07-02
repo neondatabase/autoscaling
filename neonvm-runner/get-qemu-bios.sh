@@ -7,7 +7,7 @@ USAGE="$0 <arch> <OS>"
 #
 # If the required file is already present, with the correct SHA256 hash, nothing will change.
 
-ARM_LINARO_SHA='e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
+ARM_LINARO_SHA='42f915c44de6858f69ae6f1ffc9eaa3884d1b2ca97a7537d81312fb0dfd712cd'
 
 ARM64_DARWIN_BIOS_SHA='47765fe344818cbc464b1c14ae658fb4b854f5c2ceffa982411731eb4865594d'
 ARM64_DARWIN_QEMU_VERSION='10.0.2_2'
@@ -93,7 +93,10 @@ download_linaro_aarch64 () {
         fi
     fi
 
-    curl -f "https://releases.linaro.org/components/kernel/uefi-linaro/16.02/release/qemu64/QEMU_EFI.fd" -o "$file"
+
+    url="https://releases.linaro.org/components/kernel/uefi-linaro/16.02/release/qemu64/QEMU_EFI.fd"
+    echo "Fetching '$url' -> '$file'"
+    curl -fL "$url" -o "$file"
 
     sha256="$(sha256sum "$file" | cut -d' ' -f1)"
     if [ "$sha256" = "$ARM_LINARO_SHA" ]; then
@@ -124,7 +127,7 @@ download_qemu_applesilicon_aarch64 () {
 
     url="https://ghcr.io/v2/homebrew/core/qemu/blobs/sha256:$ARM64_DARWIN_QEMU_SHA"
 
-    echo "Fetching '$url' -> "$tmpfile""
+    echo "Fetching '$url' -> '$tmpfile'"
     curl -fL \
         -H 'Authorization: Bearer QQ==' \
         "$url" \
