@@ -207,6 +207,13 @@ jobs:
           docker cp ${ID}:/vmlinuz neonvm-kernel/vmlinuz
           docker rm -f ${ID}
 
+      - name: Get QEMU BIOS for platform
+        env:
+          ARCH: ${{ matrix.arch }}
+          OS: linux
+        run: |
+          neonvm-runner/get-qemu-bios.sh "$ARCH" "$OS"
+
       - name: Build go dependencies image
         uses: docker/build-push-action@471d1dc4e07e5cdedd4c2171150001c434f0b7a4 # v6.15.0
         id: build-go-dependencies-image
@@ -233,6 +240,8 @@ jobs:
           tags: ${{ steps.tags.outputs.runner }}
           build-args: |
             GO_BASE_IMG=${{ env.GO_BASE_IMG }}
+            FIRMWARE_ARCH=${{ matrix.arch }}
+            FIRMWARE_OS=linux
 
       - name: Build and push neonvm-controller image
         uses: docker/build-push-action@471d1dc4e07e5cdedd4c2171150001c434f0b7a4 # v6.15.0

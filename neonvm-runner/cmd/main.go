@@ -330,7 +330,7 @@ func buildQEMUCmd(
 	switch cfg.architecture {
 	case architectureArm64:
 		// add custom firmware to have ACPI working
-		qemuCmd = append(qemuCmd, "-bios", "/vm/QEMU_EFI_ARM.fd")
+		qemuCmd = append(qemuCmd, "-bios", "/vm/firmware/QEMU_EFI.fd")
 		// arm virt has only one UART, setup virtio-serial to add more /dev/hvcX
 		qemuCmd = append(qemuCmd,
 			"-chardev", "stdio,id=virtio-console",
