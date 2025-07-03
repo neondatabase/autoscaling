@@ -438,7 +438,7 @@ func main() {
 	for _, arg := range *buildArgs {
 		kv := strings.SplitN(arg, "=", 2)
 		if len(kv) != 2 {
-			log.Fatalf("unexpected build arg %q, must have \"key=value\" syntax")
+			log.Fatalf("unexpected build arg %q, must have \"key=value\" syntax", kv)
 		}
 
 		finalBuildArgs[kv[0]] = &kv[1]
