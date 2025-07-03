@@ -42,26 +42,32 @@ spec:
               allocations:
                 additionalProperties:
                   description: |-
-                    IPAllocation represents metadata about the pod/container owner of a specific IP
-                    coped from Whereabout CNI as their allocation functions used
+                    Deprecated: This type is deprecated and will be removed in a future version.
+                    IPAllocation represents metadata about the VM owner of a specific IP.
                   properties:
                     id:
-                      type: string
-                    podref:
                       type: string
                   required:
                   - id
                   type: object
                 description: |-
+                  Deprecated: This field is deprecated and will be removed in a future version.
                   Allocations is the set of allocated IPs for the given range. Its` indices are a direct mapping to the
                   IP with the same index/offset for the pool's range.
+                type: object
+              managed:
+                additionalProperties:
+                  description: Unit represents an empty struct for use in sets/maps
+                  type: object
+                description: Managed is the set of IPs that are managed by the IPAM
+                  manager.
                 type: object
               range:
                 description: Range is a RFC 4632/4291-style string that represents
                   an IP address and prefix length in CIDR notation
                 type: string
             required:
-            - allocations
+            - managed
             - range
             type: object
         type: object
