@@ -263,7 +263,7 @@ jobs:
           MATRIX_ARCH: ${{ matrix.arch }}
         run: |
           case "$ARCH" in
-              'amd64', 'arm64')
+              'amd64' | 'arm64')
                   ;;
               *)
                   echo "Unexpected architecture $MATRIX_ARCH"
