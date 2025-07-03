@@ -119,7 +119,7 @@ jobs:
         env:
           MATRIX_ARCH: ${{ matrix.arch }}
         run: |
-          case "$ARCH" in
+          case "$MATRIX_ARCH" in
               'amd64' | 'arm64')
                   ;;
               *)
