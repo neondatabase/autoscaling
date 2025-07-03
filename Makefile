@@ -205,10 +205,12 @@ docker-build-controller: docker-build-go-base ## Build docker image for NeonVM c
 		.
 
 .PHONY: docker-build-runner
-docker-build-runner: docker-build-go-base ## Build docker image for NeonVM runner
-	docker build \
+docker-build-runner: docker-build-go-base download-qemu-bios ## Build docker image for NeonVM runner
+	docker buildx build \
 		--tag $(IMG_RUNNER) \
 		--build-arg GO_BASE_IMG=$(GO_BASE_IMG) \
+		--build-arg FIRMWARE_ARCH="$(TARGET_ARCH)" \
+		--build-arg FIRMWARE_OS="$(GOOS)" \
 		--file neonvm-runner/Dockerfile \
 		.
 
@@ -282,6 +284,9 @@ docker-build-pg16-disk-test: bin/vm-builder ## Build a VM image for testing
 ifndef ignore-not-found
   ignore-not-found = false
 endif
+
+download-qemu-bios:
+	neonvm-runner/get-qemu-bios.sh "$(TARGET_ARCH)" "$(GOOS)"
 
 # Build the kernel for the target architecture.
 # The builder image platform is not specified because the kernel is built for the target architecture using crosscompilation.

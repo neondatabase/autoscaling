@@ -853,14 +853,10 @@ func updatePodMetadataIfNecessary(ctx context.Context, c client.Client, vm *vmv1
 		ignoreExtra map[string]bool // use bool here so `if ignoreExtra[key] { ... }` works
 	}{
 		{
-			metaField: "labels",
-			expected:  labelsForVirtualMachine(vm, nil), // don't include runner version
-			actual:    runnerPod.Labels,
-			ignoreExtra: map[string]bool{
-				// Don't override the runner pod version - we need to keep it around without
-				// changing it; otherwise it's not useful!
-				vmv1.RunnerPodVersionLabel: true,
-			},
+			metaField:   "labels",
+			expected:    labelsForVirtualMachine(vm),
+			actual:      runnerPod.Labels,
+			ignoreExtra: map[string]bool{},
 		},
 		{
 			metaField: "annotations",
@@ -1112,7 +1108,7 @@ func (r *VMReconciler) certSecretForVirtualMachine(
 
 // labelsForVirtualMachine returns the labels for selecting the resources
 // More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/common-labels/
-func labelsForVirtualMachine(vm *vmv1.VirtualMachine, runnerVersion *api.RunnerProtoVersion) map[string]string {
+func labelsForVirtualMachine(vm *vmv1.VirtualMachine) map[string]string {
 	l := make(map[string]string, len(vm.Labels)+3)
 	for k, v := range vm.Labels {
 		l[k] = v
@@ -1120,9 +1116,6 @@ func labelsForVirtualMachine(vm *vmv1.VirtualMachine, runnerVersion *api.RunnerP
 
 	l["app.kubernetes.io/name"] = "NeonVM"
 	l[vmv1.VirtualMachineNameLabel] = vm.Name
-	if runnerVersion != nil {
-		l[vmv1.RunnerPodVersionLabel] = fmt.Sprintf("%d", *runnerVersion)
-	}
 	return l
 }
 
@@ -1203,8 +1196,7 @@ func podSpec(
 	sshSecret *corev1.Secret,
 	config *ReconcilerConfig,
 ) (*corev1.Pod, error) {
-	runnerVersion := api.RunnerProtoV1
-	labels := labelsForVirtualMachine(vm, &runnerVersion)
+	labels := labelsForVirtualMachine(vm)
 	annotations := annotationsForVirtualMachine(vm)
 	affinity := affinityForVirtualMachine(vm)
 
