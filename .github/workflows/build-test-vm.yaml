@@ -89,7 +89,7 @@ jobs:
         # Sometimes setup-go gets stuck. Without this, it'll keep going until the job gets killed
         timeout-minutes: 10
       - name: Build daemon image
-        run: make docker-build-daemon
+        run: make TARGET_ARCH=${{ matrix.arch }} docker-build-daemon
         env:
           IMG_DAEMON: ${{ steps.tags.outputs.daemon }}
 

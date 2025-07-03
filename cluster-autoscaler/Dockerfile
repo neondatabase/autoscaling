@@ -1,3 +1,6 @@
+ARG DISTROLESS_IMG_TAG=replaceme
+ARG DISTROLESS_IMG_SHA=replaceme
+
 # NOTE: This must match CA's builder/Dockerfile:
 # https://github.com/kubernetes/autoscaler/blob/<GIT_TAG>/builder/Dockerfile
 FROM golang:1.22.2@sha256:d5302d40dc5fbbf38ec472d1848a9d2391a13f93293a6a5b0b87c99dc0eaa6ae AS builder
