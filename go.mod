@@ -45,6 +45,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.53.2
 	github.com/cert-manager/cert-manager v1.16.4
 	github.com/cilium/cilium v1.12.14
+	github.com/coder/websocket v1.8.13
 	github.com/containerd/cgroups/v3 v3.0.1
 	github.com/containernetworking/cni v1.1.1
 	github.com/coreos/go-iptables v0.6.0
@@ -226,5 +227,3 @@ require (
 	sigs.k8s.io/structured-merge-diff/v4 v4.4.1 // indirect
 	sigs.k8s.io/yaml v1.4.0 // indirect
 )
-
-require github.com/coder/websocket v1.8.13
