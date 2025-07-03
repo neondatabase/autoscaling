@@ -17,65 +17,32 @@ PG16_DISK_TEST_IMG ?= pg16-disk-test:dev
 GOARCH ?= $(shell go env GOARCH)
 GOOS ?= $(shell go env GOOS)
 
-# The target architecture for linux kernel. Possible values: amd64 or arm64.
-# Any other supported by linux kernel architecture could be added by introducing new build step into neonvm/hack/kernel/Dockerfile
-UNAME_ARCH := $(shell uname -m)
-ifeq ($(UNAME_ARCH),x86_64)
-    HOST_ARCH ?= amd64
-else ifeq ($(UNAME_ARCH),aarch64)
-    HOST_ARCH ?= arm64
-else ifeq ($(UNAME_ARCH),arm64)
-    HOST_ARCH ?= arm64
-else
-    $(error Unsupported architecture: $(UNAME_ARCH))
-endif
+# Determine architecture-specific image SHAs -- see 'versions.env' for more
+include versions.env
 
+# "Host" and "Target" architectures:
+#
+# On apple silicon w/ rosetta, it's possible to run 'docker build' as if the machine is x86 or ARM.
+# It's a somewhat niche ability, but we expect to be able to cross-compile the linux kernel, and
+# this allows us to exhaustively check compatibility by compiling FROM x86/ARM TO x86/ARM.
+#
+# Normal usage of the Makefile doesn't need to worry about these.
+#
+# If you're cross-compiling:
+#
+# * Use HOST_ARCH to control what you're compiling *from* -- only makes sense with rosetta
+# * Use TARGET_ARCH to control what you're compiling *to* -- expected to work everywhere
+#
+# HOST_ARCH defaults to the architecture of the machine running 'make'.
+# If not overridden, TARGET_ARCH will default to HOST_ARCH.
+#
+# Valid architecture values are 'amd64' (= x86_64) or 'arm64' (= aarch64).
+#
+# HOST_ARCH ?= $(GOARCH) # use GOARCH because it's already amd64/arm64
+HOST_ARCH ?= $(GOARCH)
 TARGET_ARCH ?= $(HOST_ARCH)
 
-# Architecture-specific images with SHAs.
-# We need the architecture-specific versions because referring to the multi-platform digest will end
-# up getting errors if you try two different platforms -- the second platform will have the same SHA
-# but resolve to a different underlying image.
-# More info on that here: https://github.com/moby/moby/issues/43188
-#
-# For each of these images, you can fetch the platform-specific SHAs with:
-#
-#   docker manifest inspect <image>:<tag>@sha256:<SHA> \
-#     | jq '.manifests[] | select(.platform.os == "linux") | select(.platform.architecture == "amd64" or .platform.architecture == "arm64")'
-#
-# If you get "manifest verification failed", it might be that the tag no longer refers to that SHA.
-# You can try again with 'docker manifest inspect <image>@sha256:<SHA>' instead (dropping the ':<tag>')
-
-# alpine images for @sha256:e5d0aea7f7d2954678a9a6269ca2d06e06591881161961ea59e974dff3f12377
-ALPINE_IMG_TAG ?= 3.19.7
-ALPINE_IMG_SHA_AMD64 ?= @sha256:06793e3dc83d9a0733c70010283ed1735ff75fc0d40e3eac330aaef41a2f5049
-ALPINE_IMG_SHA_ARM64 ?= @sha256:b77521a60a51daad2b199da6efdd78956f79739d36379c2d13165f18ae1c4bee
-
-# golang images for @sha256:ef18ee7117463ac1055f5a370ed18b8750f01589f13ea0b48642f5792b234044
-GOLANG_IMG_TAG ?= 1.24.3-alpine
-GOLANG_IMG_SHA_AMD64 ?= @sha256:be1cf73ca9fbe9c5108691405b627cf68b654fb6838a17bc1e95cc48593e70da
-GOLANG_IMG_SHA_ARM64 ?= @sha256:fc5d0e129a17eb8c40c872b3337f548ed003ae93e658b647761562e17ff3058d
-
-# gcr.io/distroless/static images for @sha256:6ec5aa99dc335666e79dc64e4a6c8b89c33a543a1967f20d360922a80dd21f02
-DISTROLESS_IMG_TAG ?= nonroot
-DISTROLESS_IMG_SHA_AMD64 ?= @sha256:e855cfad87387db4658f58f72e09f243bdb58f0697e0535d371092d8c03dfd82
-DISTROLESS_IMG_SHA_ARM64 ?= @sha256:27a586a3bf6339aad15f4fd6048e6c6381f76a18d971c1c5a5e691e1fb59b880
-
-# ubuntu images for @sha256:72297848456d5d37d1262630108ab308d3e9ec7ed1c3286a32fe09856619a782
-UBUNTU_IMG_TAG ?= 24.04
-UBUNTU_IMG_SHA_AMD64 ?= @sha256:3afff29dffbc200d202546dc6c4f614edc3b109691e7ab4aa23d02b42ba86790
-UBUNTU_IMG_SHA_ARM64 ?= @sha256:a3f23b6e99cee41b8fffbd8a22d75728bb1f06af30fc79f533f27c096eda8993
-
-# busybox images for @sha256:1602e40bcbe33b2424709f35005c974bb8de80a11e2722316535f38af3036da8
-BUSYBOX_IMG_TAG ?= 1.35.0-musl
-BUSYBOX_IMG_SHA_AMD64 ?= @sha256:e0b2a0f0bbb24966adb038db1fba7f45d25804602b53d901474b21122399962d
-BUSYBOX_IMG_SHA_ARM64 ?= @sha256:86e3969e2c5b1a006da06016224b1579a52b1e770e8c2779ba45ac9d600c9418
-
-# rust images for @sha256:1030547bd568497d69e41771ada279179f0613369dc54779e46a3f6f376b3020
-RUST_IMG_TAG ?= 1.85-alpine
-RUST_IMG_SHA_AMD64 ?= @sha256:84b5e9c7c2f9437f62769913b419cc02a1e310bf40fd86720cd2b3b64bffb452
-RUST_IMG_SHA_ARM64 ?= @sha256:bda9e5682eeb0013c19b06e469812ae54cbe76cf0128796def8eb9bfe30a5c72
-
+# Based on the host architecture -- for compiling the kernel.
 ifeq ($(HOST_ARCH),amd64)
 	UBUNTU_IMG_SHA ?= $(UBUNTU_IMG_SHA_AMD64)
 else ifeq ($(HOST_ARCH),arm64)
@@ -84,7 +51,7 @@ else
 	$(error Unsupported HOST_ARCH: $(HOST_ARCH))
 endif
 
-
+# Based on the target architecture -- for the final images.
 ifeq ($(TARGET_ARCH),amd64)
 	ALPINE_IMG_SHA ?= $(ALPINE_IMG_SHA_AMD64)
 	GOLANG_IMG_SHA ?= $(GOLANG_IMG_SHA_AMD64)
@@ -302,7 +269,6 @@ docker-build-runner: docker-build-go-base download-qemu-bios ## Build docker ima
 docker-build-daemon: docker-build-go-base ## Build docker image for NeonVM daemon.
 	docker build \
 		--tag $(IMG_DAEMON) \
-		--build-arg TARGET_ARCH=$(TARGET_ARCH) \
 		--platform=linux/$(TARGET_ARCH) \
 		--file neonvm-daemon/Dockerfile \
 		.

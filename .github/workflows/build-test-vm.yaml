@@ -115,9 +115,33 @@ jobs:
           username: ${{ secrets.NEON_DOCKERHUB_USERNAME }}
           password: ${{ secrets.NEON_DOCKERHUB_PASSWORD }}
 
+      - name: Load base image tags and SHAs into env
+        env:
+          MATRIX_ARCH: ${{ matrix.arch }}
+        run: |
+          case "$ARCH" in
+              'amd64', 'arm64')
+                  ;;
+              *)
+                  echo "Unexpected architecture $MATRIX_ARCH"
+                  ;;
+          esac
+
+          arch="${MATRIX_ARCH@U}" # upper-case
+          grep -v '^#' versions.env | grep -E "^[A-Z]+(_TAG|_SHA_$arch)=" | sed -e "s/_$arch=/=/g" >> $GITHUB_ENV
+
       - name: build ${{ steps.tags.outputs.vm-postgres-16-bullseye }}
         run: |
-          ./bin/vm-builder -src postgres:16-bullseye -spec tests/e2e/image-spec.yaml -dst ${{ steps.tags.outputs.vm-postgres-16-bullseye }} -daemon-image ${{ steps.tags.outputs.daemon }} -target-arch linux/${{ matrix.arch }}
+          ./bin/vm-builder \
+              -src postgres:16-bullseye \
+              -dst ${{ steps.tags.outputs.vm-postgres-16-bullseye }} \
+              -daemon-image ${{ steps.tags.outputs.daemon }} \
+              -build-arg ALPINE_IMG_TAG=$ALPINE_IMG_TAG \
+              -build-arg ALPINE_IMG_SHA=$ALPINE_IMG_SHA \
+              -build-arg RUST_IMG_TAG=$RUST_IMG_TAG \
+              -build-arg RUST_IMG_SHA=$RUST_IMG_SHA \
+              -target-arch linux/${{ matrix.arch }} \
+              -spec tests/e2e/image-spec.yaml
 
       - name: docker push and annotate image ${{ steps.tags.outputs.vm-postgres-16-bullseye }}
         run: |

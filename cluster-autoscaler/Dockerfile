@@ -31,7 +31,7 @@ RUN cd autoscaler/cluster-autoscaler \
 # https://github.com/kubernetes/autoscaler/blob/cluster-autoscaler-1.24.1/cluster-autoscaler/Dockerfile.amd64
 # modified in a way to use gcr.io/distroless/static:nonroot without specifying the architecture.
 
-FROM gcr.io/distroless/static:nonroot@sha256:6ec5aa99dc335666e79dc64e4a6c8b89c33a543a1967f20d360922a80dd21f02
+FROM gcr.io/distroless/static:$DISTROLESS_IMG_TAG$DISTROLESS_IMG_SHA
 
 WORKDIR /
 COPY --from=builder /workspace/cluster-autoscaler .
