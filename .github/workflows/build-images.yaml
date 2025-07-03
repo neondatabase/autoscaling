@@ -212,7 +212,7 @@ jobs:
           esac
 
           arch="${MATRIX_ARCH@U}" # upper-case
-          grep -v '^#' versions.env | grep -E "^[A-Z]+(_TAG|_SHA_$arch)=" | sed -e "s/_$arch=/=/g" >> $GITHUB_ENV
+          grep -v '^#' versions.env | grep -E "^[A-Z_]+(_TAG|_SHA_$arch)=" | sed -e "s/_$arch=/=/g" >> $GITHUB_ENV
 
       - name: Load VM kernel
         env:
