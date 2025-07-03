@@ -29,10 +29,15 @@ RUN apk add --no-cache \
     tcpdump \
     tini
 
-COPY --from=builder /runner /usr/bin/runner
-COPY neonvm-kernel/vmlinuz /vm/kernel/vmlinuz
 COPY neonvm-runner/ssh_config /etc/ssh/ssh_config
-# QEMU_EFI used only by runner running on the arm architecture
-RUN wget https://releases.linaro.org/components/kernel/uefi-linaro/16.02/release/qemu64/QEMU_EFI.fd -O /vm/QEMU_EFI_ARM.fd
+COPY neonvm-kernel/vmlinuz    /vm/kernel/vmlinuz
+
+# Specialized firmware is only required for ARM, so we copy the directory, which will be empty if
+# there is no firmware needed. If not empty, there will be a QEMU_EFI.fd file.
+ARG FIRMWARE_ARCH
+ARG FIRMWARE_OS
+COPY neonvm-runner/external-firmware/$FIRMWARE_ARCH-$FIRMWARE_OS /vm/firmware
+
+COPY --from=builder /runner /usr/bin/runner
 
 ENTRYPOINT ["/sbin/tini", "--", "runner"]
