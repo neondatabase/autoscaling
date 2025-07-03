@@ -26,6 +26,7 @@ type ReconcilerMetrics struct {
 	vmCreationToVMRunningTime      prometheus.Histogram
 	vmRestartCounts                prometheus.Counter
 	reconcileDuration              prometheus.HistogramVec
+	forceRetryCount                *prometheus.CounterVec
 }
 
 const OutcomeLabel = "outcome"
@@ -84,6 +85,12 @@ func MakeReconcilerMetrics() ReconcilerMetrics {
 				Name:    "reconcile_duration_seconds",
 				Help:    "Time duration of reconciles",
 				Buckets: buckets,
+			}, []string{OutcomeLabel},
+		)),
+		forceRetryCount: util.RegisterMetric(metrics.Registry, prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "force_retry_count",
+				Help: "Total number of objects that are force-retried",
 			}, []string{OutcomeLabel},
 		)),
 	}
@@ -224,6 +231,7 @@ func (d *wrappedReconciler) requeueNonRetried(ctx context.Context, keys []client
 			"object", key,
 		)
 		d.submitRequest(reconcile.Request{NamespacedName: key})
+		d.Metrics.forceRetryCount.WithLabelValues(string(outcome)).Inc()
 	}
 }
 
