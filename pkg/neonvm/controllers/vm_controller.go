@@ -854,7 +854,7 @@ func updatePodMetadataIfNecessary(ctx context.Context, c client.Client, vm *vmv1
 	}{
 		{
 			metaField:   "labels",
-			expected:    labelsForVirtualMachine(vm), // don't include runner version
+			expected:    labelsForVirtualMachine(vm),
 			actual:      runnerPod.Labels,
 			ignoreExtra: map[string]bool{},
 		},
