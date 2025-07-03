@@ -487,18 +487,6 @@ type VCPUCgroup struct {
 	VCPUs vmv1.MilliCPU
 }
 
-// this a similar version type for controller <-> runner communications
-// see PluginProtoVersion comment for details
-type RunnerProtoVersion uint32
-
-const (
-	RunnerProtoV1 RunnerProtoVersion = iota + 1
-)
-
-func (v RunnerProtoVersion) SupportsCgroupFractionalCPU() bool {
-	return v >= RunnerProtoV1
-}
-
 ////////////////////////////////////
 //   Agent <-> Monitor Messages   //
 ////////////////////////////////////
