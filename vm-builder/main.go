@@ -18,6 +18,8 @@ import (
 	"github.com/alessio/shellescape"
 	"github.com/distribution/reference"
 	cliconfig "github.com/docker/cli/cli/config"
+	dockercontext "github.com/docker/cli/cli/context"
+	contextstore "github.com/docker/cli/cli/context/store"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/registry"
@@ -214,10 +216,39 @@ func main() {
 		authConfigs[key] = registry.AuthConfig(value)
 	}
 
+	dockerClientOpts := []client.Opt{
+		client.FromEnv,
+		client.WithAPIVersionNegotiation(),
+	}
+
+	if dockerConfig.CurrentContext != "" {
+		store := contextstore.New(
+			cliconfig.ContextStoreDir(),
+			contextstore.NewConfig(
+				contextstore.TypeGetter(func() any { return new(contextstore.Metadata) }),
+				contextstore.EndpointTypeGetter("docker", contextstore.TypeGetter(func() any { return new(dockercontext.EndpointMetaBase) })),
+			),
+		)
+
+		meta, err := store.GetMetadata(dockerConfig.CurrentContext)
+		if err != nil {
+			log.Fatalf("failed to get metadata for docker context %q: %s", dockerConfig.CurrentContext, err)
+		} else if _, ok := meta.Endpoints["docker"]; !ok {
+			log.Fatalf("metadata for docker context %q missing \"docker\" endpoint", dockerConfig.CurrentContext)
+		}
+
+		endpointMeta := meta.Endpoints["docker"].(dockercontext.EndpointMetaBase)
+		if endpointMeta.Host == "" {
+			log.Fatalf("docker endpoint host for context %q is missing", dockerConfig.CurrentContext)
+		}
+
+		dockerClientOpts = append(dockerClientOpts, client.WithHost(endpointMeta.Host))
+	}
+
 	ctx := context.Background()
 
 	log.Println("Setup docker connection")
-	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	cli, err := client.NewClientWithOpts(dockerClientOpts...)
 	if err != nil {
 		log.Fatalln(err)
 	}
