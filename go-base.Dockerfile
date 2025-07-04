@@ -1,6 +1,8 @@
 # Base image for go dependencies, to speed up builds when they haven't changed.
 # For more, see https://github.com/neondatabase/go-chef
-FROM golang:1.24.3-alpine@sha256:ef18ee7117463ac1055f5a370ed18b8750f01589f13ea0b48642f5792b234044 AS chef
+ARG GOLANG_IMG_TAG=replaceme
+ARG GOLANG_IMG_SHA=replaceme
+FROM golang:$GOLANG_IMG_TAG$GOLANG_IMG_SHA AS chef
 
 ARG GO_CHEF_VERSION=v0.1.0
 RUN go install github.com/neondatabase/go-chef@$GO_CHEF_VERSION

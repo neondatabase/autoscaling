@@ -17,17 +17,53 @@ PG16_DISK_TEST_IMG ?= pg16-disk-test:dev
 GOARCH ?= $(shell go env GOARCH)
 GOOS ?= $(shell go env GOOS)
 
-# The target architecture for linux kernel. Possible values: amd64 or arm64.
-# Any other supported by linux kernel architecture could be added by introducing new build step into neonvm/hack/kernel/Dockerfile
-UNAME_ARCH := $(shell uname -m)
-ifeq ($(UNAME_ARCH),x86_64)
-    TARGET_ARCH ?= amd64
-else ifeq ($(UNAME_ARCH),aarch64)
-    TARGET_ARCH ?= arm64
-else ifeq ($(UNAME_ARCH),arm64)
-    TARGET_ARCH ?= arm64
+# Determine architecture-specific image SHAs -- see 'versions.env' for more
+include versions.env
+
+# "Host" and "Target" architectures:
+#
+# On apple silicon w/ rosetta, it's possible to run 'docker build' as if the machine is x86 or ARM.
+# It's a somewhat niche ability, but we expect to be able to cross-compile the linux kernel, and
+# this allows us to exhaustively check compatibility by compiling FROM x86/ARM TO x86/ARM.
+#
+# Normal usage of the Makefile doesn't need to worry about these.
+#
+# If you're cross-compiling:
+#
+# * Use HOST_ARCH to control what you're compiling *from* -- only makes sense with rosetta
+# * Use TARGET_ARCH to control what you're compiling *to* -- expected to work everywhere
+#
+# HOST_ARCH defaults to the architecture of the machine running 'make'.
+# If not overridden, TARGET_ARCH will default to HOST_ARCH.
+#
+# Valid architecture values are 'amd64' (= x86_64) or 'arm64' (= aarch64).
+#
+# HOST_ARCH ?= $(GOARCH) # use GOARCH because it's already amd64/arm64
+HOST_ARCH ?= $(GOARCH)
+TARGET_ARCH ?= $(HOST_ARCH)
+
+# Based on the host architecture -- for compiling the kernel.
+ifeq ($(HOST_ARCH),amd64)
+	UBUNTU_IMG_SHA ?= $(UBUNTU_IMG_SHA_AMD64)
+else ifeq ($(HOST_ARCH),arm64)
+	UBUNTU_IMG_SHA ?= $(UBUNTU_IMG_SHA_ARM64)
 else
-    $(error Unsupported architecture: $(UNAME_ARCH))
+	$(error Unsupported HOST_ARCH: $(HOST_ARCH))
+endif
+
+# Based on the target architecture -- for the final images.
+ifeq ($(TARGET_ARCH),amd64)
+	ALPINE_IMG_SHA ?= $(ALPINE_IMG_SHA_AMD64)
+	GOLANG_IMG_SHA ?= $(GOLANG_IMG_SHA_AMD64)
+	DISTROLESS_IMG_SHA ?= $(DISTROLESS_IMG_SHA_AMD64)
+	RUST_IMG_SHA ?= $(RUST_IMG_SHA_AMD64)
+else ifeq ($(TARGET_ARCH),arm64)
+	ALPINE_IMG_SHA ?= $(ALPINE_IMG_SHA_ARM64)
+	GOLANG_IMG_SHA ?= $(GOLANG_IMG_SHA_ARM64)
+	DISTROLESS_IMG_SHA ?= $(DISTROLESS_IMG_SHA_ARM64)
+	RUST_IMG_SHA ?= $(RUST_IMG_SHA_ARM64)
+else
+	$(error Unsupported TARGET_ARCH: $(TARGET_ARCH))
 endif
 
 # Get the currently used golang base path
@@ -165,7 +201,14 @@ build: vet bin/vm-builder ## Build all neonvm binaries.
 
 .PHONY: bin/vm-builder
 bin/vm-builder: ## Build vm-builder binary.
-	CGO_ENABLED=0 go build -o bin/vm-builder -ldflags "-X main.Version=${GIT_INFO} -X main.NeonvmDaemonImage=${IMG_DAEMON}" vm-builder/main.go
+	CGO_ENABLED=0 go build \
+		-o bin/vm-builder \
+		-ldflags "\
+			-X main.Version=${GIT_INFO} -X main.NeonvmDaemonImage=${IMG_DAEMON} \
+			-X main.AlpineImageTag=${ALPINE_IMG_TAG} -X main.AlpineImageShaAmd64=${ALPINE_IMG_SHA_AMD64} -X main.AlpineImageShaArm64=${ALPINE_IMG_SHA_ARM64} \
+			-X main.BusyboxImageTag=${BUSYBOX_IMG_TAG} -X main.BusyboxImageShaAmd64=${BUSYBOX_IMG_SHA_AMD64} -X main.BusyboxImageShaArm64=${BUSYBOX_IMG_SHA_ARM64} \
+			" \
+		vm-builder/*.go
 .PHONY: run
 run: vet ## Run a controller from your host.
 	go run ./neonvm/main.go
@@ -192,6 +235,9 @@ docker-push: docker-build ## Push docker images to docker registry
 docker-build-go-base:
 	docker build \
 		--tag $(GO_BASE_IMG) \
+		--build-arg GOLANG_IMG_TAG=$(GOLANG_IMG_TAG) \
+		--build-arg GOLANG_IMG_SHA=$(GOLANG_IMG_SHA) \
+		--platform=linux/$(TARGET_ARCH) \
 		--file go-base.Dockerfile \
 		.
 
@@ -200,7 +246,9 @@ docker-build-controller: docker-build-go-base ## Build docker image for NeonVM c
 	docker build \
 		--tag $(IMG_CONTROLLER) \
 		--build-arg GO_BASE_IMG=$(GO_BASE_IMG) \
-		--build-arg VM_RUNNER_IMAGE=$(IMG_RUNNER) \
+		--build-arg DISTROLESS_IMG_SHA=$(DISTROLESS_IMG_SHA) \
+		--build-arg DISTROLESS_IMG_TAG=$(DISTROLESS_IMG_TAG) \
+		--platform=linux/$(TARGET_ARCH) \
 		--file neonvm-controller/Dockerfile \
 		.
 
@@ -208,9 +256,13 @@ docker-build-controller: docker-build-go-base ## Build docker image for NeonVM c
 docker-build-runner: docker-build-go-base download-qemu-bios ## Build docker image for NeonVM runner
 	docker buildx build \
 		--tag $(IMG_RUNNER) \
+		--build-arg ALPINE_IMG_TAG=$(ALPINE_IMG_TAG) \
+		--build-arg ALPINE_IMG_SHA=$(ALPINE_IMG_SHA) \
 		--build-arg GO_BASE_IMG=$(GO_BASE_IMG) \
 		--build-arg FIRMWARE_ARCH="$(TARGET_ARCH)" \
 		--build-arg FIRMWARE_OS="$(GOOS)" \
+		--build-arg TARGET_ARCH="$(TARGET_ARCH)" \
+		--platform=linux/$(TARGET_ARCH) \
 		--file neonvm-runner/Dockerfile \
 		.
 
@@ -218,7 +270,7 @@ docker-build-runner: docker-build-go-base download-qemu-bios ## Build docker ima
 docker-build-daemon: docker-build-go-base ## Build docker image for NeonVM daemon.
 	docker build \
 		--tag $(IMG_DAEMON) \
-		--build-arg TARGET_ARCH=$(TARGET_ARCH) \
+		--platform=linux/$(TARGET_ARCH) \
 		--file neonvm-daemon/Dockerfile \
 		.
 
@@ -226,36 +278,57 @@ docker-build-daemon: docker-build-go-base ## Build docker image for NeonVM daemo
 docker-build-vxlan-controller: docker-build-go-base ## Build docker image for NeonVM vxlan controller
 	docker build \
 		--tag $(IMG_VXLAN_CONTROLLER) \
+		--build-arg ALPINE_IMG_TAG=$(ALPINE_IMG_TAG) \
+		--build-arg ALPINE_IMG_SHA=$(ALPINE_IMG_SHA) \
 		--build-arg GO_BASE_IMG=$(GO_BASE_IMG) \
 		--build-arg TARGET_ARCH=$(TARGET_ARCH) \
+		--platform=linux/$(TARGET_ARCH) \
 		--file neonvm-vxlan-controller/Dockerfile \
 		.
 
 .PHONY: docker-build-autoscaler-agent
 docker-build-autoscaler-agent: docker-build-go-base ## Build docker image for autoscaler-agent
-	docker buildx build \
+	docker build \
 		--tag $(IMG_AUTOSCALER_AGENT) \
+		--build-arg ALPINE_IMG_TAG=$(ALPINE_IMG_TAG) \
+		--build-arg ALPINE_IMG_SHA=$(ALPINE_IMG_SHA) \
 		--build-arg GO_BASE_IMG=$(GO_BASE_IMG) \
-		--build-arg "GIT_INFO=$(GIT_INFO)" \
+		--platform=linux/$(TARGET_ARCH) \
 		--file autoscaler-agent/Dockerfile \
 		.
 
 .PHONY: docker-build-scheduler
 docker-build-scheduler: docker-build-go-base ## Build docker image for (autoscaling) scheduler
-	docker buildx build \
+	docker build \
 		--tag $(IMG_SCHEDULER) \
+		--build-arg ALPINE_IMG_TAG=$(ALPINE_IMG_TAG) \
+		--build-arg ALPINE_IMG_SHA=$(ALPINE_IMG_SHA) \
 		--build-arg GO_BASE_IMG=$(GO_BASE_IMG) \
-		--build-arg "GIT_INFO=$(GIT_INFO)" \
+		--platform=linux/$(TARGET_ARCH) \
 		--file autoscale-scheduler/Dockerfile \
 		.
 
 .PHONY: docker-build-vm-postgres
 docker-build-vm-postgres: bin/vm-builder ## Build docker images for testing VMs
-	./bin/vm-builder -src postgres:15-bullseye -dst $(E2E_TESTS_VM_IMG) -spec tests/e2e/image-spec.yaml -target-arch linux/$(TARGET_ARCH)
+	./bin/vm-builder \
+		-src postgres:15-bullseye \
+		-dst $(E2E_TESTS_VM_IMG) \
+		-build-arg RUST_IMG_TAG=$(RUST_IMG_TAG) \
+		-build-arg RUST_IMG_SHA=$(RUST_IMG_SHA) \
+		-target-arch linux/$(TARGET_ARCH) \
+		-spec tests/e2e/image-spec.yaml
 
 .PHONY: docker-build-pg16-disk-test
 docker-build-pg16-disk-test: bin/vm-builder ## Build a VM image for testing
-	./bin/vm-builder -src alpine:3.19 -dst $(PG16_DISK_TEST_IMG) -spec vm-examples/pg16-disk-test/image-spec.yaml -target-arch linux/$(TARGET_ARCH)
+	./bin/vm-builder \
+		-src alpine:$(ALPINE_IMG_TAG)$(ALPINE_IMG_SHA) \
+		-dst $(PG16_DISK_TEST_IMG) \
+		-build-arg ALPINE_IMG_TAG=$(ALPINE_IMG_TAG) \
+		-build-arg ALPINE_IMG_SHA=$(ALPINE_IMG_SHA) \
+		-build-arg RUST_IMG_TAG=$(RUST_IMG_TAG) \
+		-build-arg RUST_IMG_SHA=$(RUST_IMG_SHA) \
+		-target-arch linux/$(TARGET_ARCH) \
+		-spec vm-examples/pg16-disk-test/image-spec.yaml
 
 #.PHONY: docker-push
 #docker-push: ## Push docker image with the controller.
@@ -293,26 +366,31 @@ download-qemu-bios:
 # Target is generic and can be used for any supported architecture by specifying the TARGET_ARCH variable.
 .PHONY: kernel
 kernel: ## Build linux kernel.
+	set -eux; \
 	rm -f neonvm-kernel/vmlinuz; \
 	kernel_version="$$(neonvm-kernel/echo-version.sh)"; \
-	iidfile=$$(mktemp /tmp/iid-XXXXXX); \
-	trap "rm $$iidfile" EXIT; \
 	version_suffix="-local-$$(date -u '+%FT%TZ')-$$(git describe --dirty)"; \
 	docker buildx build \
+		--tag neonvm-kernel:dev \
+		--build-arg UBUNTU_IMG_TAG=$(UBUNTU_IMG_TAG) \
+		--build-arg UBUNTU_IMG_SHA=$(UBUNTU_IMG_SHA) \
+		--build-arg ALPINE_IMG_TAG=$(ALPINE_IMG_TAG) \
+		--build-arg ALPINE_IMG_SHA=$(ALPINE_IMG_SHA) \
+		--build-arg ALPINE_IMG_SHA_AMD64=$(ALPINE_IMG_SHA_AMD64) \
+		--build-arg ALPINE_IMG_SHA_ARM64=$(ALPINE_IMG_SHA_ARM64) \
 		--build-arg KERNEL_VERSION=$$kernel_version \
 		--build-arg VERSION_SUFFIX=$$version_suffix \
 		--target "kernel_${TARGET_ARCH}" \
-		--pull \
-		--load \
-		--iidfile $$iidfile \
+		--platform linux/$(HOST_ARCH) \
 		--file neonvm-kernel/Dockerfile \
 		neonvm-kernel; \
-	id=$$(docker create $$(cat $$iidfile)); \
-	docker cp $$id:/vmlinuz neonvm-kernel/vmlinuz; \
+	id=$$(docker create neonvm-kernel:dev); \
+	docker cp $$id:/vmlinuz neonvm-kernel/vmlinuz-$(TARGET_ARCH); \
 	docker rm -f $$id
 
 .PHONY: kernel-source
 kernel-source: ## Set up git repo for the current kernel version and apply existing patches
+	set -eux; \
 	kernel_version="$$(neonvm-kernel/echo-version.sh)"; \
 	dir="neonvm-kernel/linux"; \
 	mkdir -p "$$dir"; \
@@ -330,6 +408,7 @@ kernel-source: ## Set up git repo for the current kernel version and apply exist
 
 .PHONY: kernel-patches
 kernel-patches: ## Generate kernel patch files from the git repo
+	set -eux; \
 	kernel_version="$$(neonvm-kernel/echo-version.sh)"; \
 	dir='neonvm-kernel/linux'; \
 	( set -x ; test -e "$$dir/.git" ); \
