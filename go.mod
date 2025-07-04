@@ -45,6 +45,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.53.2
 	github.com/cert-manager/cert-manager v1.16.4
 	github.com/cilium/cilium v1.12.14
+	github.com/coder/websocket v1.8.13
 	github.com/containerd/cgroups/v3 v3.0.1
 	github.com/containernetworking/cni v1.1.1
 	github.com/coreos/go-iptables v0.6.0
@@ -83,7 +84,6 @@ require (
 	k8s.io/client-go v0.31.7
 	k8s.io/klog/v2 v2.130.1
 	k8s.io/kubernetes v1.31.7
-	nhooyr.io/websocket v1.8.7
 	sigs.k8s.io/controller-runtime v0.19.7 // should match k8s dependencies versions
 )
 
