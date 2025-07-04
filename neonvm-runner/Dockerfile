@@ -32,7 +32,9 @@ RUN apk add --no-cache \
     tini
 
 COPY neonvm-runner/ssh_config /etc/ssh/ssh_config
-COPY neonvm-kernel/vmlinuz    /vm/kernel/vmlinuz
+
+ARG TARGET_ARCH
+COPY neonvm-kernel/vmlinuz-$TARGET_ARCH /vm/kernel/vmlinuz
 
 # Specialized firmware is only required for ARM, so we copy the directory, which will be empty if
 # there is no firmware needed. If not empty, there will be a QEMU_EFI.fd file.

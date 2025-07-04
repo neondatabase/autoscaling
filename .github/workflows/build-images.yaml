@@ -217,10 +217,11 @@ jobs:
       - name: Load VM kernel
         env:
           IMAGE: ${{ needs.vm-kernel.outputs.image }}
+          ARCH: ${{ matrix.arch }}
         run: |
           docker pull --quiet $IMAGE
           ID=$(docker create $IMAGE true)
-          docker cp ${ID}:/vmlinuz neonvm-kernel/vmlinuz
+          docker cp ${ID}:/vmlinuz neonvm-kernel/vmlinuz-$ARCH
           docker rm -f ${ID}
 
       - name: Get QEMU BIOS for platform
@@ -265,6 +266,7 @@ jobs:
             GO_BASE_IMG=${{ env.GO_BASE_IMG }}
             FIRMWARE_ARCH=${{ matrix.arch }}
             FIRMWARE_OS=linux
+            TARGET_ARCH=${{ matrix.arch }}
 
       - name: Build and push neonvm-controller image
         uses: docker/build-push-action@471d1dc4e07e5cdedd4c2171150001c434f0b7a4 # v6.15.0

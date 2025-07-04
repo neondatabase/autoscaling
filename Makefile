@@ -261,6 +261,7 @@ docker-build-runner: docker-build-go-base download-qemu-bios ## Build docker ima
 		--build-arg GO_BASE_IMG=$(GO_BASE_IMG) \
 		--build-arg FIRMWARE_ARCH="$(TARGET_ARCH)" \
 		--build-arg FIRMWARE_OS="$(GOOS)" \
+		--build-arg TARGET_ARCH="$(TARGET_ARCH)" \
 		--platform=linux/$(TARGET_ARCH) \
 		--file neonvm-runner/Dockerfile \
 		.
@@ -384,7 +385,7 @@ kernel: ## Build linux kernel.
 		--file neonvm-kernel/Dockerfile \
 		neonvm-kernel; \
 	id=$$(docker create neonvm-kernel:dev); \
-	docker cp $$id:/vmlinuz neonvm-kernel/vmlinuz; \
+	docker cp $$id:/vmlinuz neonvm-kernel/vmlinuz-$(TARGET_ARCH); \
 	docker rm -f $$id
 
 .PHONY: kernel-source
