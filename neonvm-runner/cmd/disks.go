@@ -193,9 +193,8 @@ func createISO9660runtime(
 	}
 
 	// Add tools.
-	mounts = append(mounts, "/neonvm/bin/mkdir -p /mnt/tools")
-	mounts = append(mounts, "/neonvm/bin/mount -t iso9660 -o ro,exec $(/neonvm/bin/blkid -L vm-tools) /mnt/tools")
-	mounts = append(mounts, "/neonvm/bin/ln -s /mnt/tools/* /usr/local/bin/")
+	mounts = append(mounts, "/neonvm/bin/mkdir -p /neonvm/tools")
+	mounts = append(mounts, "/neonvm/bin/mount -t iso9660 -o ro,exec $(/neonvm/bin/blkid -L vm-tools) /neonvm/tools")
 
 	if len(disks) != 0 {
 		for _, disk := range disks {
