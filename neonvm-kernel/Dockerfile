@@ -85,6 +85,7 @@ ADD linux-config-amd64-${KERNEL_VERSION} linux-${KERNEL_VERSION}/.config
 ARG VERSION_SUFFIX
 RUN cd linux-${KERNEL_VERSION} \
     && make ARCH=x86_64 CROSS_COMPILE=x86_64-linux-gnu- EXTRAVERSION="$VERSION_SUFFIX" -j `nproc` \
+    && make modules_prepare \
     && make headers_install INSTALL_HDR_PATH=/build/linux-headers
 
 FROM build-tools-deps AS build_tools_amd64
@@ -108,6 +109,7 @@ ARG KERNEL_VERSION
 ADD linux-config-aarch64-${KERNEL_VERSION} linux-${KERNEL_VERSION}/.config
 RUN cd linux-${KERNEL_VERSION} \
     && make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- EXTRAVERSION="$VERSION_SUFFIX" -j `nproc` \
+    && make modules_prepare \
     && make headers_install INSTALL_HDR_PATH=/build/linux-headers
 
 FROM build-tools-deps AS build_tools_arm64
