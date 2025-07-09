@@ -615,14 +615,27 @@ k3d-destroy-cluster:
 logs-dir-setup:
 	@mkdir -p tests/logs
 
-.PHONY: deploy-fluent-bit
-deploy-fluent-bit: kubectl
-	$(KUBECTL) apply -f tests/fluent-bit/
-	$(KUBECTL) -n kube-system rollout status daemonset fluent-bit
-
 .PHONY: logs-dir-cleanup
 logs-dir-cleanup:
 	@rm -rf tests/logs/*
+
+.PHONY: deploy-fluent-bit
+deploy-fluent-bit: kubectl apply-fluent-bit status-fluent-bit
+
+.PHONY: reload-fluent-bit
+reload-fluent-bit: kubectl apply-fluent-bit restart-fluent-bit status-fluent-bit logs-dir-cleanup
+
+.PHONY: apply-fluent-bit
+apply-fluent-bit: kubectl
+	$(KUBECTL) apply -f tests/fluent-bit/
+
+.PHONY: restart-fluent-bit
+restart-fluent-bit: kubectl
+	$(KUBECTL) -n kube-system rollout restart daemonset/fluent-bit
+
+.PHONY: status-fluent-bit
+status-fluent-bit: kubectl
+	$(KUBECTL) -n kube-system rollout status daemonset fluent-bit
 
 ##@ Build Dependencies
 
