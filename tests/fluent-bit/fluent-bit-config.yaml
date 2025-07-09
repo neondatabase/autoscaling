@@ -27,6 +27,7 @@ data:
     @INCLUDE filter-kubernetes.conf
     @INCLUDE filter-lua.conf
     @INCLUDE filter-rewrite-tag.conf
+    @INCLUDE filter-format.conf
     @INCLUDE output-file.conf
 
   input-kubernetes.conf: |
@@ -76,14 +77,22 @@ data:
         Rule  $kubernetes['pod_name'] ^(.+)$ pod.$pod_timestamp.$1 true
         Emitter_Name re_emitted
 
+  filter-format.conf: |
+    [FILTER]
+        Name              lua
+        Match             pod.*
+        Script            format_log.lua
+        Call              format_log
+
   output-file.conf: |
     [OUTPUT]
         Name              file
         Match             pod.*
         Path              /logs/
         # File key removed, filename defaults to rewritten tag
-        # Use plain format
-        Format            plain
+        # Use template format to output formatted log
+        Format            template
+        Template          {prefix} {log_processed}
 
   parsers.conf: |
     [PARSER]
@@ -119,5 +128,28 @@ data:
 
         -- Use the stored timestamp for this pod
         record["pod_timestamp"] = pod_timestamps[pod_name]
+        return 1, timestamp, record
+    end
+
+  format_log.lua: |
+    function format_log(tag, timestamp, record)
+        local log = record["log_processed"]
+        if not log then
+            log = record["log"]
+            record["log_processed"] = log
+        end
+
+        local time_str = os.date("%Y-%m-%d %H:%M:%S", timestamp)
+        local msg = log["msg"]
+        if not msg and log["fields"] and log["fields"]["message"] then
+            msg = log["fields"]["message"]
+        end
+
+        if not msg then
+            msg = log
+        end
+
+        record["prefix"] = time_str .. " " .. tostring(msg)
+
         return 1, timestamp, record
     end
