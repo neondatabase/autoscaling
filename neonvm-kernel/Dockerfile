@@ -84,7 +84,8 @@ ARG KERNEL_VERSION
 ADD linux-config-amd64-${KERNEL_VERSION} linux-${KERNEL_VERSION}/.config
 ARG VERSION_SUFFIX
 RUN cd linux-${KERNEL_VERSION} \
-    && make ARCH=x86_64 CROSS_COMPILE=x86_64-linux-gnu- EXTRAVERSION="$VERSION_SUFFIX" -j `nproc`
+    && make ARCH=x86_64 CROSS_COMPILE=x86_64-linux-gnu- EXTRAVERSION="$VERSION_SUFFIX" -j `nproc` \
+    && make headers_install INSTALL_HDR_PATH=/build/linux-headers
 
 FROM build-tools-deps AS build_tools_amd64
 ARG KERNEL_VERSION
@@ -98,14 +99,16 @@ RUN cd linux-${KERNEL_VERSION}/tools/perf \
 FROM --platform=linux/amd64 alpine:3.19.7@sha256:e5d0aea7f7d2954678a9a6269ca2d06e06591881161961ea59e974dff3f12377 AS kernel_amd64
 ARG KERNEL_VERSION
 COPY --from=build_kernel_amd64 /build/linux-${KERNEL_VERSION}/arch/x86/boot/bzImage /vmlinuz
-COPY --from=build_tools_amd64 /build/linux-${KERNEL_VERSION}/tools/perf/perf /tools/perf
+COPY --from=build_kernel_amd64 /build/linux-headers /tools/lib/modules/${KERNEL_VERSION}
+COPY --from=build_tools_amd64 /build/linux-${KERNEL_VERSION}/tools/perf/perf /tools/bin/perf
 
 # Build the kernel on arm64
 FROM build-kernel-deps AS build_kernel_arm64
 ARG KERNEL_VERSION
 ADD linux-config-aarch64-${KERNEL_VERSION} linux-${KERNEL_VERSION}/.config
 RUN cd linux-${KERNEL_VERSION} \
-    && make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- EXTRAVERSION="$VERSION_SUFFIX" -j `nproc`
+    && make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- EXTRAVERSION="$VERSION_SUFFIX" -j `nproc` \
+    && make headers_install INSTALL_HDR_PATH=/build/linux-headers
 
 FROM build-tools-deps AS build_tools_arm64
 ARG KERNEL_VERSION
@@ -118,7 +121,8 @@ RUN cd linux-${KERNEL_VERSION}/tools/perf \
 FROM --platform=linux/arm64 alpine:3.19.7@sha256:e5d0aea7f7d2954678a9a6269ca2d06e06591881161961ea59e974dff3f12377 AS kernel_arm64
 ARG KERNEL_VERSION
 COPY --from=build_kernel_arm64 /build/linux-${KERNEL_VERSION}/arch/arm64/boot/Image /vmlinuz
-COPY --from=build_tools_arm64 /build/linux-${KERNEL_VERSION}/tools/perf/perf /tools/perf
+COPY --from=build_kernel_arm64 /build/linux-headers /tools/lib/modules/${KERNEL_VERSION}
+COPY --from=build_tools_arm64 /build/linux-${KERNEL_VERSION}/tools/perf/perf /tools/bin/perf
 
 # Dummy default target without target architecture
 FROM alpine:3.19.7@sha256:e5d0aea7f7d2954678a9a6269ca2d06e06591881161961ea59e974dff3f12377
