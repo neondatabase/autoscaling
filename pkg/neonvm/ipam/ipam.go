@@ -106,6 +106,8 @@ func FromClient(kClient *Client, params IPAMParams) (*IPAM, error) {
 		return nil, fmt.Errorf("network-attachment-definition %s has no manager config", nad.Name)
 	}
 
+	metrics := NewIPAMMetrics(params.MetricsReg)
+
 	var managers []*Manager
 	for _, rangeConfig := range ipamConfig.IPRanges {
 		err := rangeConfig.Normalize()
@@ -114,7 +116,7 @@ func FromClient(kClient *Client, params IPAMParams) (*IPAM, error) {
 		}
 		// NAD and IPPool are in the same namespace
 		poolNamespace := params.NADNamespace
-		poolClient, err := NewPoolClient(kClient.VMClient, &rangeConfig, ipamConfig.NetworkName, poolNamespace)
+		poolClient, err := NewPoolClient(kClient.VMClient, &rangeConfig, ipamConfig.NetworkName, poolNamespace, metrics)
 		if err != nil {
 			return nil, fmt.Errorf("error creating pool client: %w", err)
 		}
@@ -124,12 +126,13 @@ func FromClient(kClient *Client, params IPAMParams) (*IPAM, error) {
 			return nil, fmt.Errorf("error creating manager: %w", err)
 		}
 		managers = append(managers, manager)
+		metrics.AddManager(manager)
 	}
 
 	return &IPAM{
 		Config:   *ipamConfig,
 		Client:   *kClient,
-		metrics:  NewIPAMMetrics(params.MetricsReg),
+		metrics:  metrics,
 		managers: managers,
 	}, nil
 }
@@ -222,7 +225,7 @@ func (i *IPAM) doSetActive(ctx context.Context) error {
 		return fmt.Errorf("failed to get VMs: %w", err)
 	}
 
-	active := make(map[netip.Addr]VMID)
+	active := make(map[netip.Addr]types.UID)
 	for _, vm := range vmList {
 		if len(vm.Status.ExtraNetIP) == 0 {
 			continue
@@ -232,10 +235,7 @@ func (i *IPAM) doSetActive(ctx context.Context) error {
 			return fmt.Errorf("failed to parse IP %s: %w", vm.Status.ExtraNetIP, err)
 		}
 
-		active[ip] = VMID{
-			Namespace: vm.Namespace,
-			Name:      vm.Name,
-		}
+		active[ip] = vm.UID
 	}
 
 	for _, manager := range i.managers {

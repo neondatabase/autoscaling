@@ -9,11 +9,13 @@ import (
 	"time"
 
 	"github.com/Jille/contextcond"
+	"github.com/prometheus/client_golang/prometheus"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"k8s.io/apimachinery/pkg/types"
 
 	v1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
+	"github.com/neondatabase/autoscaling/pkg/util/metricfunc"
 )
 
 type IPAMManagerConfig struct {
@@ -262,6 +264,8 @@ func (m *Manager) callRebalance(ctx context.Context) {
 		log.Error(err, "error rebalancing IP pool")
 	} else {
 		log.Info("rebalanced IP pool", "pool", m.pool.PoolName(), "free", len(m.free), "unknown", len(m.unknown))
+
+		m.ipCountLog(ctx)
 	}
 }
 
@@ -291,8 +295,14 @@ func (m *Manager) rebalance(ctx context.Context) error {
 	if len(m.free) < m.cfg.LowIPCount {
 		newFree = append(newFree, m.free...)
 		for ip := range m.pool.rangeConfig.AllIPs() {
+			if _, ok := pool.Spec.Managed[ip.String()]; ok {
+				continue
+			}
 			newFree = append(newFree, ip)
 			pool.Spec.Managed[ip.String()] = v1.Unit{}
+			if len(newFree) >= m.cfg.LowIPCount {
+				break
+			}
 		}
 	}
 
@@ -304,4 +314,33 @@ func (m *Manager) rebalance(ctx context.Context) error {
 	m.free = newFree
 
 	return nil
+}
+
+func (m *Manager) ipCountMetric() []metricfunc.MetricValue {
+	var result []metricfunc.MetricValue
+	add := func(state string, value int) {
+		result = append(result, metricfunc.MetricValue{
+			Labels: prometheus.Labels{PoolLabel: m.pool.PoolName(), StateLabel: state},
+			Value:  float64(value),
+		})
+	}
+
+	m.ipCount(add)
+
+	return result
+}
+
+func (m *Manager) ipCountLog(ctx context.Context) {
+	log := log.FromContext(ctx)
+
+	m.ipCount(func(state string, value int) {
+		log.Info("ipCounts", "pool", m.pool.PoolName(), "state", state, "value", value)
+	})
+}
+
+func (m *Manager) ipCount(cb func(state string, value int)) {
+	cb("allocated", len(m.allocations))
+	cb("free", len(m.free))
+	cb("unknown", len(m.unknown))
+	cb("cooldown", len(m.cooldownQueue))
 }
