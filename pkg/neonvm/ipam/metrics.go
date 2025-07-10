@@ -6,17 +6,28 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/neondatabase/autoscaling/pkg/util"
+	"github.com/neondatabase/autoscaling/pkg/util/metricfunc"
 )
 
 type IPAMMetrics struct {
 	ongoing  *prometheus.GaugeVec
 	duration *prometheus.HistogramVec
+
+	managerIPCount *metricfunc.GaugeVecFunc
+	poolIPCount    *prometheus.GaugeVec
 }
 
 const (
 	IPAMSuccess = "success"
 	IPAMFailure = "failure"
 	IPAMPanic   = "panic"
+)
+
+const (
+	ActionLabel  = "action"
+	OutcomeLabel = "outcome"
+	PoolLabel    = "pool"
+	StateLabel   = "state"
 )
 
 func NewIPAMMetrics(reg prometheus.Registerer) *IPAMMetrics {
@@ -29,13 +40,25 @@ func NewIPAMMetrics(reg prometheus.Registerer) *IPAMMetrics {
 		ongoing: util.RegisterMetric(reg, prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "ipam_ongoing_requests",
 			Help: "Number of ongoing IPAM requests",
-		}, []string{"action"})),
+		}, []string{ActionLabel})),
 		duration: util.RegisterMetric(reg, prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Name:    "ipam_request_duration_seconds",
 			Help:    "Duration of IPAM requests",
 			Buckets: buckets,
-		}, []string{"action", "outcome"})),
+		}, []string{ActionLabel, OutcomeLabel})),
+		managerIPCount: util.RegisterMetric(reg, metricfunc.NewGaugeVecFunc(prometheus.GaugeOpts{
+			Name: "ipam_manager_ip_count",
+			Help: "Numbers IPs in different states in IPAM Manager",
+		}, []string{PoolLabel, StateLabel})),
+		poolIPCount: util.RegisterMetric(reg, prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "ipam_pool_ip_count",
+			Help: "Numbers IPs in different states in IPAM Pool",
+		}, []string{PoolLabel, StateLabel})),
 	}
+}
+
+func (m *IPAMMetrics) AddManager(manager *Manager) {
+	m.managerIPCount.Add(manager.ipCountMetric)
 }
 
 type metricTimer struct {

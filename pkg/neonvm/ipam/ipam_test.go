@@ -162,12 +162,12 @@ func TestIPAM(t *testing.T) {
 	assert.Equal(t, "10.100.123.3/24", ip3.String())
 
 	metrics := collectMetrics(t, params.prom)
-	assert.ElementsMatch(t, []metricValue{
+	assert.Subset(t, metrics, []metricValue{
 		{Name: "ipam_request_duration_seconds", Action: "acquire", Outcome: "success", Value: 4},
 		{Name: "ipam_request_duration_seconds", Action: "release", Outcome: "success", Value: 1},
 		{Name: "ipam_ongoing_requests", Action: "acquire", Outcome: "", Value: 0},
 		{Name: "ipam_ongoing_requests", Action: "release", Outcome: "", Value: 0},
-	}, metrics)
+	})
 }
 
 func TestIPAMMetricsOnError(t *testing.T) {
@@ -185,8 +185,8 @@ func TestIPAMMetricsOnError(t *testing.T) {
 	require.Error(t, err)
 
 	metrics := collectMetrics(t, params.prom)
-	assert.ElementsMatch(t, []metricValue{
+	assert.Subset(t, metrics, []metricValue{
 		{Name: "ipam_request_duration_seconds", Action: "acquire", Outcome: "failure", Value: 1},
 		{Name: "ipam_ongoing_requests", Action: "acquire", Outcome: "", Value: 0},
-	}, metrics)
+	})
 }

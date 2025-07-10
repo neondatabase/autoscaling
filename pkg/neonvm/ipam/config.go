@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"iter"
+	"math/big"
 	"net"
 	"net/netip"
 
@@ -78,6 +79,16 @@ func (r *RangeConfiguration) Normalize() error {
 	}
 
 	return nil
+}
+
+func (r *RangeConfiguration) IPCountTotal() int64 {
+	var first, last, result big.Int
+	first.SetBytes(r.RangeStart.To4())
+	last.SetBytes(r.RangeEnd.To4())
+
+	result.Sub(&last, &first)
+
+	return result.Int64() + 1 // +1 for the last IP
 }
 
 func (r *RangeConfiguration) AllIPs() iter.Seq[netip.Addr] {

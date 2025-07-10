@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/go-logr/logr/testr"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -17,6 +19,7 @@ import (
 	nfake "github.com/neondatabase/autoscaling/neonvm/client/clientset/versioned/fake"
 	helpers "github.com/neondatabase/autoscaling/pkg/agent/core/testhelpers"
 	"github.com/neondatabase/autoscaling/pkg/neonvm/ipam"
+	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
 type managerTest struct {
@@ -24,6 +27,7 @@ type managerTest struct {
 	ctx context.Context
 
 	manager *ipam.Manager
+	prom    *prometheus.Registry
 
 	vmStates map[types.UID]*vmState
 	ipStates map[string]*ipState
@@ -48,7 +52,9 @@ func newManagerTest(t *testing.T) *managerTest {
 	require.NoError(t, rangeCfg.Normalize())
 
 	neonvmClient := nfake.NewSimpleClientset()
-	poolClient, err := ipam.NewPoolClient(neonvmClient, rangeCfg, "test", "default")
+	prom := prometheus.NewRegistry()
+	metrics := ipam.NewIPAMMetrics(prom)
+	poolClient, err := ipam.NewPoolClient(neonvmClient, rangeCfg, "test", "default", metrics)
 	require.NoError(t, err)
 
 	logger := testr.New(t)
@@ -58,11 +64,15 @@ func newManagerTest(t *testing.T) *managerTest {
 
 	manager, err := ipam.NewManager(ctx, clock.Now, managerCfg, poolClient)
 	require.NoError(t, err)
+
+	metrics.AddManager(manager)
+
 	return &managerTest{
 		t:   t,
 		ctx: ctx,
 
 		manager: manager,
+		prom:    prom,
 
 		vmStates: make(map[types.UID]*vmState),
 		ipStates: make(map[string]*ipState),
@@ -83,6 +93,16 @@ func generateAcquire(vmIDfrom, vmIDto int, actionsFrom, actionsTo int) []manager
 	rand.Shuffle(len(steps), func(i, j int) {
 		steps[i], steps[j] = steps[j], steps[i]
 	})
+
+	return steps
+}
+
+func generateRelease(vmIDmin, vmIDmax int) []managerTestStep {
+	steps := generateAcquire(vmIDmin, vmIDmax, 1, 2)
+
+	for i := range steps {
+		steps[i].action = release
+	}
 
 	return steps
 }
@@ -143,9 +163,9 @@ func (m *managerTest) run(steps []managerTestStep) {
 					vmID:             "",
 					cooldownDeadline: time.Time{},
 				}
-				m.ipStates[ip.String()] = ipSt
+				m.ipStates[ip.IP.String()] = ipSt
 			}
-			if ipSt.vmID != "" {
+			if ipSt.vmID != "" && ipSt.vmID != step.vmID {
 				m.t.Fatalf("IP %s is already allocated to %s", ip.String(), ipSt.vmID)
 			}
 			if ipSt.cooldownDeadline.After(m.clock.Now()) {
@@ -154,36 +174,171 @@ func (m *managerTest) run(steps []managerTestStep) {
 			ipSt.vmID = step.vmID
 			ipSt.cooldownDeadline = m.clock.Now().Add(step.sleep)
 
-			otherState := m.vmStates[step.vmID]
-			if otherState == nil {
-				otherState = &vmState{
+			vmSt := m.vmStates[step.vmID]
+			if vmSt == nil {
+				vmSt = &vmState{
 					ip: net.IP{},
 				}
-				m.vmStates[step.vmID] = otherState
+				m.vmStates[step.vmID] = vmSt
 			}
-			otherState.ip = ip.IP
+			vmSt.ip = ip.IP
 
 		case release:
-			state := m.vmStates[step.vmID]
-			if state == nil {
+			vmSt := m.vmStates[step.vmID]
+			if vmSt == nil {
 				m.t.Fatalf("VM %s is not allocated", step.vmID)
 			}
-			err := m.manager.Release(m.ctx, step.vmID, state.ip)
+			err := m.manager.Release(m.ctx, step.vmID, vmSt.ip)
 			if err != nil {
 				m.t.Fatalf("failed to release IP: %v", err)
 			}
+
+			ipSt := m.ipStates[vmSt.ip.String()]
+			ipSt.vmID = ""
+			ipSt.cooldownDeadline = m.clock.Now().Add(time.Second * 10)
+
 		case sleep:
 			m.clock.Inc(step.sleep)
 		}
 	}
 }
 
+func vmID(name string) util.NamespacedName {
+	return util.NamespacedName{
+		Namespace: "default",
+		Name:      name,
+	}
+}
+
+type managerMetricValue struct {
+	Name  string
+	Pool  string
+	State string
+	Count float64
+}
+
+func (m *managerTest) collectMetrics() []managerMetricValue {
+	metrics, err := m.prom.Gather()
+	require.NoError(m.t, err)
+
+	var result []managerMetricValue
+
+	for _, metric := range metrics {
+		name := metric.GetName()
+
+		for _, sample := range metric.Metric {
+			var pool, state string
+			for _, label := range sample.GetLabel() {
+				if label.GetName() == "pool" {
+					pool = label.GetValue()
+				}
+				if label.GetName() == "state" {
+					state = label.GetValue()
+				}
+			}
+
+			result = append(result, managerMetricValue{
+				Name:  name,
+				Pool:  pool,
+				State: state,
+				Count: sample.GetGauge().GetValue(),
+			})
+		}
+	}
+
+	return result
+}
+
 func TestManager(t *testing.T) {
 	manager := newManagerTest(t)
-	steps := generateAcquireRelease(0, 10, 2, 3)
-	fmt.Println(steps)
+
+	metrics := manager.collectMetrics()
+	assert.ElementsMatch(t, []managerMetricValue{
+		{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "allocated", Count: 0},
+		{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "free", Count: 0},
+		{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "unknown", Count: 0},
+		{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "cooldown", Count: 0},
+
+		{Name: "ipam_pool_ip_count", Pool: "test-10.100.0.0-16", State: "total", Count: 65535},
+	}, metrics)
+
+	steps := generateAcquireRelease(0, 10, 2, 5)
+	manager.t.Logf("steps: %v", steps)
 	manager.run(steps)
 
-	manager.t.Logf("vmStates: %v", manager.vmStates)
-	manager.t.Logf("ipStates: %v", manager.ipStates)
+	metrics = manager.collectMetrics()
+	assert.ElementsMatch(t, []managerMetricValue{
+		{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "allocated", Count: 0},
+		{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "free", Count: 40},
+		{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "unknown", Count: 0},
+		{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "cooldown", Count: 10},
+
+		{Name: "ipam_pool_ip_count", Pool: "test-10.100.0.0-16", State: "managed", Count: 50},
+		{Name: "ipam_pool_ip_count", Pool: "test-10.100.0.0-16", State: "total", Count: 65535},
+	}, metrics)
+
+	manager.clock.Inc(100 * time.Second)
+
+	manager.run(generateAcquire(0, 1, 1, 2))
+
+	metrics = manager.collectMetrics()
+	assert.ElementsMatch(t, []managerMetricValue{
+		{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "allocated", Count: 1},
+		{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "free", Count: 49},
+		{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "unknown", Count: 0},
+		{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "cooldown", Count: 0},
+
+		{Name: "ipam_pool_ip_count", Pool: "test-10.100.0.0-16", State: "managed", Count: 50},
+		{Name: "ipam_pool_ip_count", Pool: "test-10.100.0.0-16", State: "total", Count: 65535},
+	}, metrics)
+}
+
+func TestManagerProduction(t *testing.T) {
+	manager := newManagerTest(t)
+
+	computesPerMinute := 600
+	computeLifeTimeMinutes := 5
+
+	minutes := 30
+
+	for minute := 0; minute < minutes; minute++ {
+		fmt.Printf("minute: %d\n", minute)
+
+		if minute < minutes-computeLifeTimeMinutes {
+			steps := generateAcquire(minute*computesPerMinute, (minute+1)*computesPerMinute, 1, 2)
+			manager.run(steps)
+		}
+
+		if minute == 15 {
+			metrics := manager.collectMetrics()
+			assert.ElementsMatch(t, []managerMetricValue{
+				{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "allocated", Count: 3600},
+				{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "free", Count: 0},
+				{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "unknown", Count: 0},
+				{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "cooldown", Count: 600},
+
+				{Name: "ipam_pool_ip_count", Pool: "test-10.100.0.0-16", State: "managed", Count: 4200},
+				{Name: "ipam_pool_ip_count", Pool: "test-10.100.0.0-16", State: "total", Count: 65535},
+			}, metrics)
+		}
+
+		if minute >= computeLifeTimeMinutes {
+			oldMinute := minute - computeLifeTimeMinutes
+			steps := generateRelease(oldMinute*computesPerMinute, (oldMinute+1)*computesPerMinute)
+			manager.run(steps)
+		}
+
+		manager.clock.Inc(time.Minute)
+	}
+
+	metrics := manager.collectMetrics()
+	assert.ElementsMatch(t, []managerMetricValue{
+		{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "allocated", Count: 0},
+		{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "free", Count: 3000},
+		{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "unknown", Count: 0},
+		{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "cooldown", Count: 1200},
+
+		{Name: "ipam_pool_ip_count", Pool: "test-10.100.0.0-16", State: "managed", Count: 4200},
+		{Name: "ipam_pool_ip_count", Pool: "test-10.100.0.0-16", State: "total", Count: 65535},
+	}, metrics)
 }
