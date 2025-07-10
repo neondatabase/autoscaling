@@ -1402,10 +1402,19 @@ func podSpec(
 						},
 					},
 				}
+				devNetTun := corev1.Volume{
+					Name: "devNetTun",
+					VolumeSource: corev1.VolumeSource{
+						HostPath: &corev1.HostPathVolumeSource{
+							Path: "/dev/net/tun",
+							Type: lo.ToPtr(corev1.HostPathCharDev),
+						},
+					},
+				}
 				if config.DisableRunnerCgroup {
-					return []corev1.Volume{images}
+					return []corev1.Volume{images, devNetTun}
 				} else {
-					return []corev1.Volume{images, cgroup}
+					return []corev1.Volume{images, cgroup, devNetTun}
 				}
 			}(),
 		},
