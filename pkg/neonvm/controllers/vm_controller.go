@@ -1286,7 +1286,7 @@ func podSpec(
 					// Ensure restrictive context for the container
 					// More info: https://kubernetes.io/docs/concepts/security/pod-security-standards/#restricted
 					SecurityContext: &corev1.SecurityContext{
-						Privileged: lo.ToPtr(false),
+						Privileged: lo.ToPtr(true),
 						Capabilities: &corev1.Capabilities{
 							Add: []corev1.Capability{
 								"NET_ADMIN",
