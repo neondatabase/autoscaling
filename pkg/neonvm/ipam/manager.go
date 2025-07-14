@@ -236,13 +236,13 @@ func (m *Manager) Run(ctx context.Context) {
 	log := log.FromContext(ctx)
 
 	for {
+		m.callRebalance(ctx)
+
 		err := m.rebalanceCondition.WaitContext(ctx)
 		if err != nil {
 			log.Info("context cancelled, stopping rebalance loop")
 			return
 		}
-
-		m.callRebalance(ctx)
 	}
 }
 

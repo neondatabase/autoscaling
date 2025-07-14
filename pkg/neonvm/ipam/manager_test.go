@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"net"
+	"net/netip"
+	"slices"
 	"testing"
 	"time"
 
@@ -12,36 +14,39 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
 	nfake "github.com/neondatabase/autoscaling/neonvm/client/clientset/versioned/fake"
 	helpers "github.com/neondatabase/autoscaling/pkg/agent/core/testhelpers"
 	"github.com/neondatabase/autoscaling/pkg/neonvm/ipam"
-	"github.com/neondatabase/autoscaling/pkg/util"
+	"github.com/neondatabase/autoscaling/pkg/util/taskgroup"
 )
 
 type managerTest struct {
 	t   *testing.T
 	ctx context.Context
 
-	manager *ipam.Manager
-	prom    *prometheus.Registry
+	neonvmClient *nfake.Clientset
+	manager      *ipam.Manager
+	prom         *prometheus.Registry
 
 	vmStates map[types.UID]*vmState
 	ipStates map[string]*ipState
 	clock    *helpers.FakeClock
 }
 
-func newManagerTest(t *testing.T) *managerTest {
+func (m *managerTest) init() {
 	managerCfg := &ipam.IPAMManagerConfig{
 		CooldownPeriod: "70s",
 		HighIPCount:    100,
 		LowIPCount:     50,
 		TargetIPCount:  75,
 	}
-	require.NoError(t, managerCfg.Normalize())
+	require.NoError(m.t, managerCfg.Normalize())
 
 	rangeCfg := &ipam.RangeConfiguration{
 		Range:      "10.100.0.0/16",
@@ -49,35 +54,44 @@ func newManagerTest(t *testing.T) *managerTest {
 		RangeEnd:   nil,
 		OmitRanges: nil,
 	}
-	require.NoError(t, rangeCfg.Normalize())
+	require.NoError(m.t, rangeCfg.Normalize())
 
-	neonvmClient := nfake.NewSimpleClientset()
 	prom := prometheus.NewRegistry()
 	metrics := ipam.NewIPAMMetrics(prom)
-	poolClient, err := ipam.NewPoolClient(neonvmClient, rangeCfg, "test", "default", metrics)
-	require.NoError(t, err)
+	poolClient, err := ipam.NewPoolClient(m.neonvmClient, rangeCfg, "test", "default", metrics)
+	require.NoError(m.t, err)
 
+	manager, err := ipam.NewManager(m.ctx, m.clock.Now, managerCfg, poolClient)
+	require.NoError(m.t, err)
+
+	metrics.AddManager(manager)
+
+	m.manager = manager
+	m.prom = prom
+}
+
+func newManagerTest(t *testing.T) *managerTest {
 	logger := testr.New(t)
 	ctx := log.IntoContext(context.Background(), logger)
 
 	clock := helpers.NewFakeClock(t)
+	neonvmClient := nfake.NewSimpleClientset()
 
-	manager, err := ipam.NewManager(ctx, clock.Now, managerCfg, poolClient)
-	require.NoError(t, err)
-
-	metrics.AddManager(manager)
-
-	return &managerTest{
+	m := &managerTest{
 		t:   t,
 		ctx: ctx,
 
-		manager: manager,
-		prom:    prom,
+		neonvmClient: neonvmClient,
+		manager:      nil,
+		prom:         nil,
 
 		vmStates: make(map[types.UID]*vmState),
 		ipStates: make(map[string]*ipState),
 		clock:    clock,
 	}
+	m.init()
+
+	return m
 }
 
 func generateAcquire(vmIDfrom, vmIDto int, actionsFrom, actionsTo int) []managerTestStep {
@@ -200,13 +214,6 @@ func (m *managerTest) run(steps []managerTestStep) {
 		case sleep:
 			m.clock.Inc(step.sleep)
 		}
-	}
-}
-
-func vmID(name string) util.NamespacedName {
-	return util.NamespacedName{
-		Namespace: "default",
-		Name:      name,
 	}
 }
 
@@ -341,4 +348,133 @@ func TestManagerProduction(t *testing.T) {
 		{Name: "ipam_pool_ip_count", Pool: "test-10.100.0.0-16", State: "managed", Count: 4200},
 		{Name: "ipam_pool_ip_count", Pool: "test-10.100.0.0-16", State: "total", Count: 65535},
 	}, metrics)
+}
+
+func TestRestart(t *testing.T) {
+	manager := newManagerTest(t)
+
+	manager.run(generateAcquire(0, 10, 2, 5))
+
+	metrics := manager.collectMetrics()
+	assert.ElementsMatch(t, []managerMetricValue{
+		{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "allocated", Count: 10},
+		{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "free", Count: 40},
+		{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "unknown", Count: 0},
+		{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "cooldown", Count: 0},
+
+		{Name: "ipam_pool_ip_count", Pool: "test-10.100.0.0-16", State: "managed", Count: 50},
+		{Name: "ipam_pool_ip_count", Pool: "test-10.100.0.0-16", State: "total", Count: 65535},
+	}, metrics)
+
+	pool, err := manager.neonvmClient.NeonvmV1().IPPools("default").Get(manager.ctx, "test-10.100.0.0-16", metav1.GetOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, 50, len(pool.Spec.Managed))
+
+	manager.init()
+
+	metrics = manager.collectMetrics()
+	assert.ElementsMatch(t, []managerMetricValue{
+		{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "allocated", Count: 0},
+		{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "free", Count: 0},
+		{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "unknown", Count: 50},
+		{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "cooldown", Count: 0},
+
+		{Name: "ipam_pool_ip_count", Pool: "test-10.100.0.0-16", State: "total", Count: 65535},
+	}, metrics)
+
+	manager.run(generateAcquire(10, 11, 1, 2))
+
+	metrics = manager.collectMetrics()
+	assert.ElementsMatch(t, []managerMetricValue{
+		{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "allocated", Count: 1},
+		{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "free", Count: 49},
+		{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "unknown", Count: 50},
+		{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "cooldown", Count: 0},
+
+		{Name: "ipam_pool_ip_count", Pool: "test-10.100.0.0-16", State: "managed", Count: 100},
+		{Name: "ipam_pool_ip_count", Pool: "test-10.100.0.0-16", State: "total", Count: 65535},
+	}, metrics)
+
+	// Now we simulate only 1 VM still running for the new manager.
+	vm0 := types.UID("vm-0")
+	ip0 := manager.vmStates[vm0].ip
+
+	manager.vmStates = map[types.UID]*vmState{
+		vm0: {
+			ip: ip0,
+		},
+	}
+	manager.ipStates = map[string]*ipState{
+		ip0.String(): {
+			vmID:             vm0,
+			cooldownDeadline: time.Time{},
+		},
+	}
+
+	manager.manager.SetActive(map[netip.Addr]types.UID{
+		netip.MustParseAddr(ip0.String()): vm0,
+	})
+
+	metrics = manager.collectMetrics()
+	assert.ElementsMatch(t, []managerMetricValue{
+		{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "allocated", Count: 2}, // vm0 and vm10
+		{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "free", Count: 49},
+		{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "unknown", Count: 0},
+		{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "cooldown", Count: 49},
+
+		{Name: "ipam_pool_ip_count", Pool: "test-10.100.0.0-16", State: "managed", Count: 100},
+		{Name: "ipam_pool_ip_count", Pool: "test-10.100.0.0-16", State: "total", Count: 65535},
+	}, metrics)
+}
+
+func TestAsyncRebalance(t *testing.T) {
+	manager := newManagerTest(t)
+
+	manager.run(generateAcquire(0, 40, 2, 5))
+	metrics := manager.collectMetrics()
+	assert.ElementsMatch(t, []managerMetricValue{
+		{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "allocated", Count: 40},
+		{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "free", Count: 10},
+		{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "unknown", Count: 0},
+		{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "cooldown", Count: 0},
+
+		{Name: "ipam_pool_ip_count", Pool: "test-10.100.0.0-16", State: "managed", Count: 50},
+		{Name: "ipam_pool_ip_count", Pool: "test-10.100.0.0-16", State: "total", Count: 65535},
+	}, metrics)
+
+	ctx, cancel := context.WithCancel(manager.ctx)
+	tg := taskgroup.NewGroup(zap.NewNop(), taskgroup.WithParentContext(ctx))
+	tg.Go("run", func(_ *zap.Logger) error {
+		manager.manager.Run(ctx)
+		return nil
+	})
+
+	for i := 0; i < 10; i++ {
+		metrics = manager.collectMetrics()
+		if slices.Contains(metrics, managerMetricValue{
+			Name:  "ipam_manager_ip_count",
+			Pool:  "test-10.100.0.0-16",
+			State: "free",
+			Count: 50,
+		}) {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	assert.ElementsMatch(t, []managerMetricValue{
+		{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "allocated", Count: 40},
+		{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "free", Count: 50},
+		{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "unknown", Count: 0},
+		{Name: "ipam_manager_ip_count", Pool: "test-10.100.0.0-16", State: "cooldown", Count: 0},
+
+		{Name: "ipam_pool_ip_count", Pool: "test-10.100.0.0-16", State: "managed", Count: 90},
+		{Name: "ipam_pool_ip_count", Pool: "test-10.100.0.0-16", State: "total", Count: 65535},
+	}, metrics)
+
+	cancel()
+	err := tg.Wait()
+	require.NoError(t, err)
+
+	manager.init()
 }
