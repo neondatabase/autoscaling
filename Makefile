@@ -565,7 +565,7 @@ e2e: check-local-context e2e-tools ## Run e2e kuttl tests
 	rm -f kubeconfig
 
 .PHONY: run-e2e
-run-e2e: docker-build deploy vm-examples e2e ## Helper target to do all steps to run e2e tests locally
+run-e2e: deploy vm-examples e2e ## Helper target to do all steps to run e2e tests locally
 
 ##@ Local kind cluster
 
