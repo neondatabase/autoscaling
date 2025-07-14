@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: autoscale-scheduler # unstable name
-  namespace: kube-system
+  namespace: neonvm-system
   labels:
     component: scheduler
     tier: control-plane

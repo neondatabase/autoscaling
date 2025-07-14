@@ -425,9 +425,9 @@ deploy: check-local-context docker-build load-images render-manifests kubectl de
 	$(KUBECTL) -n neonvm-system rollout status daemonset neonvm-vxlan-controller
 	# NB: typical upgrade path requires updated scheduler before autoscaler-agents.
 	$(KUBECTL) apply -f $(RENDERED)/autoscale-scheduler.yaml
-	$(KUBECTL) -n kube-system rollout status deployment autoscale-scheduler
+	$(KUBECTL) -n neonvm-system rollout status deployment autoscale-scheduler
 	$(KUBECTL) apply -f $(RENDERED)/autoscaler-agent.yaml
-	$(KUBECTL) -n kube-system rollout status daemonset autoscaler-agent
+	$(KUBECTL) -n neonvm-system rollout status daemonset autoscaler-agent
 
 .PHONY: load-images
 load-images: check-local-context kubectl kind k3d ## Push docker images to the local kind/k3d cluster
