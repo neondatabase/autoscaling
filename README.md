@@ -148,11 +148,11 @@ For all commits, we require PR number to be present in the commit subject, like 
                                              ^ like that
 ```
 
-This happens automatically when PRs are merged with squash. When PRs are merged with rebase, we have a helper script `scripts/git-pr-number-single.sh`. 
+This happens automatically when PRs are merged with squash. When PRs are merged with rebase, we have a helper script `scripts/git-pr-number.sh`. 
 
 Therefore, workflow becomes:
 1. Create your commits locally.
 2. Create a PR.
-3. Run `scripts/git-pr-number-single.sh`, it will detect there is a PR open and will adjust the commit subjects.
+3. Run `scripts/git-pr-number.sh`, it will detect there is a PR open and will adjust the commit subjects.
 4. `git push -f origin <YOUR BRANCH>`.
 

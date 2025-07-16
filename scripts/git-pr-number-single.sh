@@ -17,6 +17,7 @@ if [[ $COMMIT_SUBJECT =~ \(#[0-9]+\) ]]; then
     exit 0
 fi
 
+# Branch name is passed from git-pr-number.sh
 PR_NUMBER=$(gh pr view "$BRANCH_NAME" --json number --jq '.number' 2>/dev/null)
 
 # If no PR number is found, proceed without appending

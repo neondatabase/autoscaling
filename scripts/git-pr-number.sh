@@ -9,10 +9,13 @@ if ! command -v gh &> /dev/null; then
     exit 0
 fi
 
-# Try to get current branch name
 BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD)
 
-BASE_BRANCH=$(gh pr view "$BRANCH_NAME" --json baseRefName --jq '.baseRefName')
+BASE_BRANCH=$(gh pr view "$BRANCH_NAME" --json baseRefName --jq '.baseRefName' || echo "")
+if [[ -z "$BASE_BRANCH" ]]; then
+    echo "Error: Unable to determine base branch. Ensure the current branch corresponds to a pull request." >&2
+    exit 1
+fi
 
 export BRANCH_NAME
 
