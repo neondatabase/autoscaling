@@ -154,5 +154,5 @@ Therefore, workflow becomes:
 1. Create your commits locally.
 2. Create a PR.
 3. Run `scripts/git-pr-number.sh`, it will detect there is a PR open and will adjust the commit subjects.
-4. `git push -f origin <YOUR BRANCH>`.
-
+4. `git push --force-with-lease origin <YOUR BRANCH>`.
+   **Warning:** Using `git push -f` (force push) can overwrite remote branch history and delete commits made by others. It is safer to use `git push --force-with-lease`, which ensures the force push only proceeds if the remote branch has not been updated since your last fetch.
