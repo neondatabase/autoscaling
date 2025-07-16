@@ -28,7 +28,6 @@ fi
 
 # Create a temporary file with the new commit message
 TMPFILE=$(mktemp)
-echo "TMPFILE: $TMPFILE"
 trap 'rm -f "$TMPFILE"' EXIT
 echo "$COMMIT_SUBJECT (#$PR_NUMBER)" > "$TMPFILE"
 echo "$COMMIT_BODY" >> "$TMPFILE"
