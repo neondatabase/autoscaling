@@ -1,17 +1,9 @@
 #!/bin/bash
 
-# Check if gh command is available
-if ! command -v gh &> /dev/null; then
-    exit 0
-fi
-
 # Check if the remote is neondatabase/autoscaling
 if ! gh repo view --json nameWithOwner -q '.nameWithOwner' 2>/dev/null | grep -q "^neondatabase/autoscaling$"; then
     exit 0
 fi
-
-# Try to get current branch name
-BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD)
 
 if [[ "$BRANCH_NAME" == "HEAD" ]]; then
     # We're in a rebase or similar detached HEAD state

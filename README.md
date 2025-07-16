@@ -137,3 +137,17 @@ To run the end-to-end tests, you need to have [`kuttl`] installed. You can run t
 ```sh
 make e2e
 ```
+
+## Contributing
+
+Splitting PRs into commits is preferred, as it allows for cleaner git history and makes the review easier.
+
+For all commits, we require PR number to be present in the commit subject, like that:
+```
+  neonvm: Remove neonvm-runner version [2/2] (#1381)
+                                             ^ like that
+```
+
+This happens automatically when PRs are merged with squash. When PRs are merged with rebase, we have a helper script.
+
+
