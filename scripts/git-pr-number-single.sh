@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 
 # Check if the remote is neondatabase/autoscaling
 if ! gh repo view --json nameWithOwner -q '.nameWithOwner' 2>/dev/null | grep -q "^neondatabase/autoscaling$"; then

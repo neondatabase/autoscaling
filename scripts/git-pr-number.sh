@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 
 # Change to the repository root directory
 cd "$(git rev-parse --show-toplevel)" || exit 1 
