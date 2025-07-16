@@ -28,10 +28,10 @@ fi
 
 # Create a temporary file with the new commit message
 TMPFILE=$(mktemp)
+trap 'rm -f "$TMPFILE"' EXIT
 echo "$COMMIT_SUBJECT (#$PR_NUMBER)" > "$TMPFILE"
 echo "$COMMIT_BODY" >> "$TMPFILE"
 git commit --amend --file="$TMPFILE"
-rm "$TMPFILE"
 
 echo "Appended PR number (#$PR_NUMBER) to the commit subject."
 
