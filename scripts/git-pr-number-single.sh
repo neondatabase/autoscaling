@@ -5,14 +5,6 @@ if ! gh repo view --json nameWithOwner -q '.nameWithOwner' 2>/dev/null | grep -q
     exit 0
 fi
 
-if [[ "$BRANCH_NAME" == "HEAD" ]]; then
-    # We're in a rebase or similar detached HEAD state
-    # Try to get the original branch name from the rebase-merge directory
-    if [[ -f "$(git rev-parse --git-dir)/rebase-merge/head-name" ]]; then
-        BRANCH_NAME=$(cat "$(git rev-parse --git-dir)/rebase-merge/head-name" | sed 's/refs\/heads\///')
-    fi
-fi
-
 # Get the commit message directly from the current commit
 COMMIT_MSG=$(git log -1 --format=%B)
 
@@ -32,8 +24,12 @@ if [[ -z $PR_NUMBER ]]; then
     exit 0
 fi
 
-# Create the new commit with updated message
-git commit --amend -m "$COMMIT_SUBJECT (#$PR_NUMBER)" -m "$COMMIT_BODY"
+# Create a temporary file with the new commit message
+TMPFILE=$(mktemp)
+echo "$COMMIT_SUBJECT (#$PR_NUMBER)" > "$TMPFILE"
+echo "$COMMIT_BODY" >> "$TMPFILE"
+git commit --amend --file="$TMPFILE"
+rm "$TMPFILE"
 
 echo "Appended PR number (#$PR_NUMBER) to the commit subject."
 
