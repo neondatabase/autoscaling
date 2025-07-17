@@ -116,7 +116,7 @@ jobs:
           password: ${{ secrets.NEON_DOCKERHUB_PASSWORD }}
 
       - name: Load base image tags and SHAs into env
-        uses: ./github/actions/deps-versions
+        uses: ./.github/actions/deps-versions
 
       - name: build ${{ steps.tags.outputs.vm-postgres-16-bullseye }}
         run: |

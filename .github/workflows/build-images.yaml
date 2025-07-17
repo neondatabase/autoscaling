@@ -199,7 +199,7 @@ jobs:
           docker buildx version
 
       - name: Load base image tags and SHAs into env
-        uses: ./github/actions/deps-versions
+        uses: ./.github/actions/deps-versions
 
       - name: Load VM kernel
         env:

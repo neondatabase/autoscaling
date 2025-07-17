@@ -259,7 +259,7 @@ jobs:
           echo "suffix=-neon-$commit-$date" | tee -a $GITHUB_OUTPUT
 
       - name: Load base image tags and SHAs into env
-        uses: ./github/actions/deps-versions
+        uses: ./.github/actions/deps-versions
 
       - name: build linux kernel
         id: build-linux-kernel
