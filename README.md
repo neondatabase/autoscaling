@@ -137,3 +137,7 @@ To run the end-to-end tests, you need to have [`kuttl`] installed. You can run t
 ```sh
 make e2e
 ```
+
+### `make run-e2e`
+
+During active development, when the kernel is already built and cluster created, one can do `make run-e2e` to test current code, which resolves to `make deploy vm-examples e2e`.

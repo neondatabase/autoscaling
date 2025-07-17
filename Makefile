@@ -546,7 +546,7 @@ k3d-load: k3d # Push docker images to the k3d cluster.
 ##@ Example VM images
 
 .PHONY: vm-examples
-examples: vm-postgres pg16-disk-test ## Build example VM images
+vm-examples: vm-postgres pg16-disk-test ## Build example VM images
 
 .PHONY: vm-postgres
 vm-postgres: docker-build-vm-postgres load-vm-postgres
@@ -556,13 +556,16 @@ pg16-disk-test: docker-build-pg16-disk-test load-pg16-disk-test
 
 ##@ End-to-End tests
 
-.PHONE: e2e-tools
+.PHONY: e2e-tools
 e2e-tools: k3d kind kubectl kuttl python-init ## Donwnload tools for e2e tests locally if necessary.
 
-.PHONE: e2e
+.PHONY: e2e
 e2e: check-local-context e2e-tools ## Run e2e kuttl tests
 	$(KUTTL) test --config tests/e2e/kuttl-test.yaml $(if $(CI),--skip-delete)
 	rm -f kubeconfig
+
+.PHONY: run-e2e
+run-e2e: deploy vm-examples e2e ## Helper target to do all steps to run e2e tests locally
 
 ##@ Local kind cluster
 
@@ -615,14 +618,27 @@ k3d-destroy-cluster:
 logs-dir-setup:
 	@mkdir -p tests/logs
 
-.PHONY: deploy-fluent-bit
-deploy-fluent-bit: kubectl
-	$(KUBECTL) apply -f tests/fluent-bit/
-	$(KUBECTL) -n kube-system rollout status daemonset fluent-bit
-
 .PHONY: logs-dir-cleanup
 logs-dir-cleanup:
 	@rm -rf tests/logs/*
+
+.PHONY: deploy-fluent-bit
+deploy-fluent-bit: kubectl apply-fluent-bit status-fluent-bit
+
+.PHONY: reload-fluent-bit
+reload-fluent-bit: kubectl apply-fluent-bit restart-fluent-bit status-fluent-bit logs-dir-cleanup
+
+.PHONY: apply-fluent-bit
+apply-fluent-bit: kubectl
+	$(KUBECTL) apply -f tests/fluent-bit/
+
+.PHONY: restart-fluent-bit
+restart-fluent-bit: kubectl
+	$(KUBECTL) -n kube-system rollout restart daemonset/fluent-bit
+
+.PHONY: status-fluent-bit
+status-fluent-bit: kubectl
+	$(KUBECTL) -n kube-system rollout status daemonset fluent-bit
 
 ##@ Build Dependencies
 
