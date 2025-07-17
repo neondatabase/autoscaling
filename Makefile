@@ -488,6 +488,11 @@ render-release: $(RENDERED) kustomize
 	cd autoscale-scheduler && $(KUSTOMIZE) edit set image autoscale-scheduler=autoscale-scheduler:dev
 	cd autoscaler-agent && $(KUSTOMIZE) edit set image autoscaler-agent=autoscaler-agent:dev
 
+.PHONY: refresh-runner
+refresh-runner: check-local-context kubectl docker-build-runner load-images
+	$(KUBECTL) apply -f $(RENDERED)/neonvm-runner-image-loader.yaml
+	$(KUBECTL) -n neonvm-system rollout status daemonset neonvm-runner-image-loader
+
 .PHONY: deploy
 deploy: check-local-context docker-build load-images render-manifests kubectl deploy-fluent-bit ## Deploy controller to the K8s cluster specified in ~/.kube/config.
 	$(KUBECTL) apply -f $(RENDERED)/multus-dev.yaml
