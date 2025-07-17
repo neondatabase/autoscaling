@@ -259,20 +259,7 @@ jobs:
           echo "suffix=-neon-$commit-$date" | tee -a $GITHUB_OUTPUT
 
       - name: Load base image tags and SHAs into env
-        env:
-          MATRIX_ARCH: ${{ matrix.arch }}
-        run: |
-          case "$MATRIX_ARCH" in
-              'amd64' | 'arm64')
-                  ;;
-              *)
-                  echo "Unexpected architecture $MATRIX_ARCH"
-                  exit 1
-                  ;;
-          esac
-
-          arch="${MATRIX_ARCH@U}" # upper-case
-          grep -v '^#' versions.env | grep -E "^[A-Z_]+(_TAG|_SHA_$arch)=" | sed -e "s/_$arch=/=/g" >> $GITHUB_ENV
+        uses: ./github/actions/deps-versions
 
       - name: build linux kernel
         id: build-linux-kernel
