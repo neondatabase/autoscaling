@@ -250,8 +250,9 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 
 	logger.Info("Starting background workers")
 
-	// FIXME: make this timeout/delay a separately defined constant, or configurable
-	mainDeadlockChecker := r.lock.DeadlockChecker(250*time.Millisecond, time.Second)
+	mainDeadlockChecker := r.lock.DeadlockChecker(
+		r.global.config.DeadlockCheckerDelay.ToDuration(),
+		r.global.config.DeadlockCheckerTimeout.ToDuration())
 
 	r.spawnBackgroundWorker(ctx, logger, "deadlock checker", ignoreLogger(mainDeadlockChecker))
 	r.spawnBackgroundWorker(ctx, logger, "podStatus updater", func(ctx2 context.Context, logger2 *zap.Logger) {
