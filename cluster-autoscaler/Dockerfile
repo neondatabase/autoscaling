@@ -1,3 +1,6 @@
+ARG DISTROLESS_IMG_TAG=replaceme
+ARG DISTROLESS_IMG_SHA=replaceme
+
 # NOTE: This must match CA's builder/Dockerfile:
 # https://github.com/kubernetes/autoscaler/blob/<GIT_TAG>/builder/Dockerfile
 FROM golang:1.22.2@sha256:d5302d40dc5fbbf38ec472d1848a9d2391a13f93293a6a5b0b87c99dc0eaa6ae AS builder
@@ -31,7 +34,7 @@ RUN cd autoscaler/cluster-autoscaler \
 # https://github.com/kubernetes/autoscaler/blob/cluster-autoscaler-1.24.1/cluster-autoscaler/Dockerfile.amd64
 # modified in a way to use gcr.io/distroless/static:nonroot without specifying the architecture.
 
-FROM gcr.io/distroless/static:nonroot@sha256:6ec5aa99dc335666e79dc64e4a6c8b89c33a543a1967f20d360922a80dd21f02
+FROM gcr.io/distroless/static:$DISTROLESS_IMG_TAG$DISTROLESS_IMG_SHA
 
 WORKDIR /
 COPY --from=builder /workspace/cluster-autoscaler .

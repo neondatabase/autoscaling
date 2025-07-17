@@ -1,4 +1,6 @@
 ARG GO_BASE_IMG=autoscaling-go-base:dev
+ARG DISTROLESS_IMG_TAG=replaceme
+ARG DISTROLESS_IMG_SHA=replaceme
 FROM $GO_BASE_IMG AS builder
 
 # Build the manager binary
@@ -7,7 +9,7 @@ RUN CGO_ENABLED=0 go build -o manager neonvm-controller/cmd/*.go
 
 # Use distroless as minimal base image to package the manager binary
 # Refer to https://github.com/GoogleContainerTools/distroless for more details
-FROM gcr.io/distroless/static:nonroot@sha256:6ec5aa99dc335666e79dc64e4a6c8b89c33a543a1967f20d360922a80dd21f02
+FROM gcr.io/distroless/static:$DISTROLESS_IMG_TAG$DISTROLESS_IMG_SHA
 
 WORKDIR /
 COPY --from=builder /workspace/manager .

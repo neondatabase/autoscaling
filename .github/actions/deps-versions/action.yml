@@ -1,0 +1,56 @@
+name: Load base image tags and SHAs into env
+description: Read versions.env for the current arch into $GITHUB_ENV
+inputs:
+  arch:
+    description: Architecture, 'amd64' or 'arm64'
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    # Example input (versions.env):
+    #     ...
+    #
+    #     # alpine images for @sha256:<SHA256 HERE>
+    #     ALPINE_IMG_TAG=3.19.7
+    #     ALPINE_IMG_SHA_AMD64=@sha256:<SHA256 HERE>>
+    #     ALPINE_IMG_SHA_ARM64=@sha256:<SHA256 HERE>
+    #
+    #     # golang images for @sha256:<SHA256 HERE>
+    #     GOLANG_IMG_TAG=1.24.3-alpine
+    #     GOLANG_IMG_SHA_AMD64=@sha256:<SHA256 HERE>
+    #     GOLANG_IMG_SHA_ARM64=@sha256:<SHA256 HERE>
+    #
+    #     ...
+    #
+    # Example output ($GITHUB_ENV):
+    #     ...
+    #
+    #     ALPINE_IMG_TAG=3.19.7
+    #     ALPINE_IMG_SHA=@sha256:<SHA256 HERE>
+    #
+    #     GOLANG_IMG_TAG=1.24.3-alpine
+    #     GOLANG_IMG_SHA=@sha256:<SHA256 HERE>
+    #     ...
+    - name: Load base image tags and SHAs into env
+      shell: bash -euxo pipefail {0}
+      env:
+        INPUT_ARCH: ${{ inputs.arch }}
+      run: |
+        case "$INPUT_ARCH" in
+            'amd64' )
+                arch=AMD64
+                ;;
+            'arm64' )
+                arch=ARM64
+                ;;
+            *)
+                echo "Unexpected architecture $INPUT_ARCH"
+                exit 1
+                ;;
+        esac
+
+        # filter out comments;
+        # filter for TAG or arch-specific SHA varaibles;
+        # remove the arch suffix from variable names.
+        grep -v '^#' versions.env | grep -E "^[A-Z_]+(_TAG|_SHA_$arch)=" | sed -e "s/_$arch=/=/g" >> $GITHUB_ENV
