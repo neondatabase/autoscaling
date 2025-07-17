@@ -55,6 +55,9 @@ type Queue struct {
 
 	// if not nil, a callback that records how long each item was waiting to be reconciled
 	queueWaitCallback QueueWaitDurationCallback
+
+	// if not nil, a callback that records whether there are currently any items in the queue
+	queueSizeCallback QueueSizeCallback
 }
 
 type kv struct {
@@ -151,6 +154,7 @@ func NewQueue(handlers map[Object]HandlerFunc, opts ...QueueOption) (*Queue, err
 		handlers: enrichedHandlers,
 
 		queueWaitCallback: settings.waitCallback,
+		queueSizeCallback: settings.sizeCallback,
 	}
 
 	go q.handleNotifications(ctx, next, enqueuedRcvr)
@@ -304,6 +308,10 @@ func (q *Queue) Enqueue(eventKind EventKind, obj Object) {
 	} else {
 		q.enqueueInactive(k, v)
 	}
+
+	if q.queueSizeCallback != nil {
+		q.queueSizeCallback(q.queue.Len())
+	}
 }
 
 // Next returns a callback to execute the next waiting reconcile operation in the queue, or false if
@@ -324,6 +332,10 @@ func (q *Queue) Next() (_ ReconcileCallback, ok bool) {
 
 	callback := func(logger *zap.Logger) {
 		q.reconcile(logger, kv.k, kv.v)
+	}
+
+	if q.queueSizeCallback != nil {
+		q.queueSizeCallback(q.queue.Len())
 	}
 
 	return callback, true
