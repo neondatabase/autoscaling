@@ -699,8 +699,8 @@ func (disp *Dispatcher) run(ctx context.Context, logger *zap.Logger, upscaleRequ
 		err := disp.HandleMessage(ctx, logger, handlers)
 		if err != nil {
 			if ctx.Err() != nil {
-				// The context is already cancelled, so this error is mostly likely
-				// expected. For example, if the context is cancelled because the
+				// The context is already canceled, so this error is mostly likely
+				// expected. For example, if the context is canceled because the
 				// runner exited, we should expect to fail to read off the connection,
 				// which is closed by the server exit.
 				logger.Warn("Error handling message", zap.Error(err))
