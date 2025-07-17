@@ -198,13 +198,19 @@ jobs:
           docker version
           docker buildx version
 
+      - name: Load base image tags and SHAs into env
+        uses: ./.github/actions/deps-versions
+        with:
+          arch: ${{ matrix.arch }}
+
       - name: Load VM kernel
         env:
           IMAGE: ${{ needs.vm-kernel.outputs.image }}
+          ARCH: ${{ matrix.arch }}
         run: |
           docker pull --quiet $IMAGE
           ID=$(docker create $IMAGE true)
-          docker cp ${ID}:/vmlinuz neonvm-kernel/vmlinuz
+          docker cp ${ID}:/vmlinuz neonvm-kernel/vmlinuz-$ARCH
           docker rm -f ${ID}
 
       - name: Get QEMU BIOS for platform
@@ -226,6 +232,10 @@ jobs:
           cache-from: ${{ format('type=registry,ref=cache.neon.build/autoscaling-go-base-{0}:cache', matrix.arch) }}
           cache-to: ${{ github.ref_name == 'main' && format('type=registry,ref=cache.neon.build/autoscaling-go-base-{0}:cache,mode=max', matrix.arch) || '' }}
           tags: ${{ env.GO_BASE_IMG }}
+          platform: linux/${{ matrix.arch }}
+          build-args: |
+            GOLANG_IMG_TAG=${{ env.GOLANG_IMG_TAG }}
+            GOLANG_IMG_SHA=${{ env.GOLANG_IMG_SHA }}
 
       - name: Build and push neonvm-runner image
         uses: docker/build-push-action@471d1dc4e07e5cdedd4c2171150001c434f0b7a4 # v6.15.0
@@ -238,10 +248,14 @@ jobs:
           cache-from: ${{ format('type=registry,ref=cache.neon.build/neonvm-runner-{0}:cache', matrix.arch) }}
           cache-to: ${{ github.ref_name == 'main' && format('type=registry,ref=cache.neon.build/neonvm-runner-{0}:cache,mode=max', matrix.arch) || '' }}
           tags: ${{ steps.tags.outputs.runner }}
+          platform: linux/${{ matrix.arch }}
           build-args: |
+            ALPINE_IMG_TAG=${{ env.ALPINE_IMG_TAG }}
+            ALPINE_IMG_SHA=${{ env.ALPINE_IMG_SHA }}
             GO_BASE_IMG=${{ env.GO_BASE_IMG }}
             FIRMWARE_ARCH=${{ matrix.arch }}
             FIRMWARE_OS=linux
+            TARGET_ARCH=${{ matrix.arch }}
 
       - name: Build and push neonvm-controller image
         uses: docker/build-push-action@471d1dc4e07e5cdedd4c2171150001c434f0b7a4 # v6.15.0
@@ -254,9 +268,11 @@ jobs:
           cache-from: ${{ format('type=registry,ref=cache.neon.build/neonvm-controller-{0}:cache', matrix.arch) }}
           cache-to: ${{ github.ref_name == 'main' && format('type=registry,ref=cache.neon.build/neonvm-controller-{0}:cache,mode=max', matrix.arch) || '' }}
           tags: ${{ steps.tags.outputs.controller }}
+          platform: linux/${{ matrix.arch }}
           build-args: |
+            DISTROLESS_IMG_TAG=${{ env.DISTROLESS_IMG_TAG }}
+            DISTROLESS_IMG_SHA=${{ env.DISTROLESS_IMG_SHA }}
             GO_BASE_IMG=${{ env.GO_BASE_IMG }}
-            VM_RUNNER_IMAGE=${{ steps.tags.outputs.runner }}
 
       - name: Build and push neonvm-vxlan-controller image
         uses: docker/build-push-action@471d1dc4e07e5cdedd4c2171150001c434f0b7a4 # v6.15.0
@@ -269,7 +285,10 @@ jobs:
           cache-from: ${{ format('type=registry,ref=cache.neon.build/neonvm-vxlan-controller-{0}:cache', matrix.arch) }}
           cache-to: ${{ github.ref_name == 'main' && format('type=registry,ref=cache.neon.build/neonvm-vxlan-controller-{0}:cache,mode=max', matrix.arch) || '' }}
           tags: ${{ steps.tags.outputs.vxlan-controller }}
+          platform: linux/${{ matrix.arch }}
           build-args: |
+            ALPINE_IMG_TAG=${{ env.ALPINE_IMG_TAG }}
+            ALPINE_IMG_SHA=${{ env.ALPINE_IMG_SHA }}
             GO_BASE_IMG=${{ env.GO_BASE_IMG }}
             TARGET_ARCH=${{ matrix.arch }}
 
@@ -284,9 +303,11 @@ jobs:
           cache-from: ${{ format('type=registry,ref=cache.neon.build/autoscale-scheduler-{0}:cache', matrix.arch) }}
           cache-to: ${{ github.ref_name == 'main' && format('type=registry,ref=cache.neon.build/autoscale-scheduler-{0}:cache,mode=max', matrix.arch) || '' }}
           tags: ${{ steps.tags.outputs.scheduler }}
+          platform: linux/${{ matrix.arch }}
           build-args: |
+            ALPINE_IMG_TAG=${{ env.ALPINE_IMG_TAG }}
+            ALPINE_IMG_SHA=${{ env.ALPINE_IMG_SHA }}
             GO_BASE_IMG=${{ env.GO_BASE_IMG }}
-            GIT_INFO=${{ steps.get-git-info.outputs.info }}:${{ inputs.tag }}
 
       - name: Build and push autoscaler-agent image
         uses: docker/build-push-action@471d1dc4e07e5cdedd4c2171150001c434f0b7a4 # v6.15.0
@@ -299,9 +320,11 @@ jobs:
           cache-from: ${{ format('type=registry,ref=cache.neon.build/autoscaler-agent-{0}:cache', matrix.arch) }}
           cache-to: ${{ github.ref_name == 'main' && format('type=registry,ref=cache.neon.build/autoscaler-agent-{0}:cache,mode=max', matrix.arch) || '' }}
           tags: ${{ steps.tags.outputs.autoscaler-agent }}
+          platform: linux/${{ matrix.arch }}
           build-args: |
+            ALPINE_IMG_TAG=${{ env.ALPINE_IMG_TAG }}
+            ALPINE_IMG_SHA=${{ env.ALPINE_IMG_SHA }}
             GO_BASE_IMG=${{ env.GO_BASE_IMG }}
-            GIT_INFO=${{ steps.get-git-info.outputs.info }}
 
       - name: Build and push neonvm-daemon image
         uses: docker/build-push-action@471d1dc4e07e5cdedd4c2171150001c434f0b7a4 # v6.15.0
@@ -314,6 +337,7 @@ jobs:
           cache-from: ${{ format('type=registry,ref=cache.neon.build/neonvm-daemon-{0}:cache', matrix.arch) }}
           cache-to: ${{ github.ref_name == 'main' && format('type=registry,ref=cache.neon.build/neonvm-daemon-{0}:cache,mode=max', matrix.arch) || '' }}
           tags: ${{ steps.tags.outputs.daemon }}
+          platform: linux/${{ matrix.arch }}
           build-args: |
             GO_BASE_IMG=${{ env.GO_BASE_IMG }}
 
@@ -327,6 +351,10 @@ jobs:
           tags: ${{ steps.tags.outputs.cluster-autoscaler }}
           cache-from: ${{ format('type=registry,ref=cache.neon.build/cluster-autoscaler-neonvm-{0}:cache', matrix.arch) }}
           cache-to: ${{ github.ref_name == 'main' && format('type=registry,ref=cache.neon.build/cluster-autoscaler-neonvm-{0}:cache,mode=max', matrix.arch) || '' }}
+          platform: linux/${{ matrix.arch }}
+          build-args: |
+            DISTROLESS_IMG_TAG=${{ env.DISTROLESS_IMG_TAG }}
+            DISTROLESS_IMG_SHA=${{ env.DISTROLESS_IMG_SHA }}
 
   merge-images:
     permissions:

@@ -9,10 +9,10 @@ USER root
 
 FROM {{.NeonvmDaemonImage}} AS neonvm-daemon-loader
 
-FROM busybox:1.35.0-musl@sha256:1602e40bcbe33b2424709f35005c974bb8de80a11e2722316535f38af3036da8 AS busybox-loader
+FROM busybox:{{.BusyboxImageTag}}{{.BusyboxImageSha}} AS busybox-loader
 
-FROM alpine:3.19.7@sha256:e5d0aea7f7d2954678a9a6269ca2d06e06591881161961ea59e974dff3f12377 AS vm-runtime
-ARG TARGET_ARCH
+FROM alpine:{{.AlpineImageTag}}{{.AlpineImageSha}} AS vm-runtime
+ARG VM_BUILDER_TARGET_ARCH
 RUN set -e && mkdir -p /neonvm/bin /neonvm/runtime /neonvm/config 
 # add busybox
 COPY --from=busybox-loader /bin/busybox /neonvm/bin/busybox
@@ -52,7 +52,7 @@ RUN set -e \
 
 # Install vector.dev binary
 RUN set -e \
-    && ARCH=$( [ "$TARGET_ARCH" = "linux/arm64" ] && echo "aarch64" || echo "x86_64") \
+    && ARCH=$( [ "$VM_BUILDER_TARGET_ARCH" = "linux/arm64" ] && echo "aarch64" || echo "x86_64") \
     && wget https://packages.timber.io/vector/0.26.0/vector-${ARCH}-unknown-linux-musl.tar.gz -O - \
     | tar xzvf - --strip-components 3 -C /neonvm/bin/ ./vector-${ARCH}-unknown-linux-musl/bin/vector
 
@@ -109,8 +109,8 @@ RUN set -e \
     && /neonvm/bin/id -g sshd > /dev/null 2>&1 || /neonvm/bin/addgroup sshd \
     && /neonvm/bin/id -u sshd > /dev/null 2>&1 || /neonvm/bin/adduser -D -H -G sshd -g 'sshd privsep' -s /neonvm/bin/nologin sshd
 
-FROM alpine:3.19.7@sha256:e5d0aea7f7d2954678a9a6269ca2d06e06591881161961ea59e974dff3f12377 AS builder
-ARG DISK_SIZE
+FROM alpine:{{.AlpineImageTag}}{{.AlpineImageSha}} AS builder
+ARG VM_BUILDER_DISK_SIZE
 COPY --from=rootdisk-mod / /rootdisk
 
 # tools for qemu disk creation
@@ -125,8 +125,8 @@ RUN set -e \
     && mkdir -p /rootdisk/etc/ssh \
     && mkdir -p /rootdisk/var/empty \
     && cp -f /rootdisk/neonvm/bin/inittab /rootdisk/etc/inittab \
-    && mkfs.ext4 -L vmroot -d /rootdisk /disk.raw ${DISK_SIZE} \
+    && mkfs.ext4 -L vmroot -d /rootdisk /disk.raw ${VM_BUILDER_DISK_SIZE} \
     && qemu-img convert -f raw -O qcow2 -o cluster_size=2M,lazy_refcounts=on /disk.raw /disk.qcow2
 
-FROM alpine:3.19.7@sha256:e5d0aea7f7d2954678a9a6269ca2d06e06591881161961ea59e974dff3f12377
+FROM alpine:{{.AlpineImageTag}}{{.AlpineImageSha}}
 COPY --from=builder /disk.qcow2 /

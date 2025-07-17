@@ -69,10 +69,19 @@ var (
 	Version           string
 	NeonvmDaemonImage string
 
+	BusyboxImageTag      string
+	BusyboxImageShaAmd64 string
+	BusyboxImageShaArm64 string
+
+	AlpineImageTag      string
+	AlpineImageShaAmd64 string
+	AlpineImageShaArm64 string
+
 	srcImage  = flag.String("src", "", `Docker image used as source for virtual machine disk image: --src=alpine:3.19`)
 	dstImage  = flag.String("dst", "", `Docker image with resulting disk image: --dst=vm-alpine:3.19`)
 	size      = flag.String("size", "1G", `Size for disk image: --size=1G`)
 	outFile   = flag.String("file", "", `Save disk image as file: --file=vm-alpine.qcow2`)
+	buildArgs = MultiStringFlag("build-arg", "Docker build-args to use during the build (multiple allowed)")
 	specFile  = flag.String("spec", "", `File containing additional customization: --spec=spec.yaml`)
 	quiet     = flag.Bool("quiet", false, `Show less output from the docker build process`)
 	forcePull = flag.Bool("pull", false, `Pull src image even if already present locally`)
@@ -120,6 +129,11 @@ type TemplatesContext struct {
 	RootDiskImage string
 
 	NeonvmDaemonImage string
+
+	BusyboxImageTag string
+	BusyboxImageSha string
+	AlpineImageTag  string
+	AlpineImageSha  string
 
 	SpecBuild       string
 	SpecMerge       string
@@ -335,6 +349,12 @@ func main() {
 
 		NeonvmDaemonImage: neonvmDaemonImage,
 
+		BusyboxImageTag: BusyboxImageTag,
+		BusyboxImageSha: getImageSha(*targetArch, BusyboxImageShaAmd64, BusyboxImageShaArm64),
+
+		AlpineImageTag: AlpineImageTag,
+		AlpineImageSha: getImageSha(*targetArch, AlpineImageShaAmd64, AlpineImageShaArm64),
+
 		SpecBuild:       "",  // overridden below if spec != nil
 		SpecMerge:       "",  // overridden below if spec != nil
 		InittabCommands: nil, // overridden below if spec != nil
@@ -412,13 +432,22 @@ func main() {
 		}
 	}
 
-	buildArgs := make(map[string]*string)
-	buildArgs["DISK_SIZE"] = size
-	buildArgs["TARGET_ARCH"] = targetArch
+	finalBuildArgs := make(map[string]*string)
+	finalBuildArgs["VM_BUILDER_DISK_SIZE"] = size
+	finalBuildArgs["VM_BUILDER_TARGET_ARCH"] = targetArch
+	for _, arg := range *buildArgs {
+		kv := strings.SplitN(arg, "=", 2)
+		if len(kv) != 2 {
+			log.Fatalf("unexpected build arg %q, must have \"key=value\" syntax", kv)
+		}
+
+		finalBuildArgs[kv[0]] = &kv[1]
+	}
+
 	opt := types.ImageBuildOptions{
 		AuthConfigs:    authConfigs,
 		Tags:           []string{dstIm},
-		BuildArgs:      buildArgs,
+		BuildArgs:      finalBuildArgs,
 		SuppressOutput: *quiet,
 		NoCache:        false,
 		Context:        tarBuffer,
@@ -599,6 +628,18 @@ func getAgettyTTY(targetArch string) string {
 		return "ttyS0"
 	case targetArchLinuxArm64:
 		return "ttyAMA0"
+	default:
+		log.Fatalf("Unsupported target architecture: %q", targetArch)
+		return ""
+	}
+}
+
+func getImageSha(targetArch string, shaAmd64 string, shaArm64 string) string {
+	switch targetArch {
+	case targetArchLinuxAmd64:
+		return shaAmd64
+	case targetArchLinuxArm64:
+		return shaArm64
 	default:
 		log.Fatalf("Unsupported target architecture: %q", targetArch)
 		return ""
