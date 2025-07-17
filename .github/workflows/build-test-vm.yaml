@@ -117,6 +117,8 @@ jobs:
 
       - name: Load base image tags and SHAs into env
         uses: ./.github/actions/deps-versions
+        with:
+          arch: ${{ matrix.arch }}
 
       - name: build ${{ steps.tags.outputs.vm-postgres-16-bullseye }}
         run: |

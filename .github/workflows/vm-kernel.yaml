@@ -260,6 +260,8 @@ jobs:
 
       - name: Load base image tags and SHAs into env
         uses: ./.github/actions/deps-versions
+        with:
+          arch: ${{ matrix.arch }}
 
       - name: build linux kernel
         id: build-linux-kernel
