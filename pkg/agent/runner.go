@@ -275,7 +275,7 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 			r,
 			ctx2,
 			logger2,
-			r.global.config.Metrics.System,
+			r.global.config.Metrics.WithOverrides(vmInfo.Config.ScalingConfig).System,
 			metricsMgr[*core.SystemMetrics]{
 				kind:         "system",
 				emptyMetrics: func() *core.SystemMetrics { return new(core.SystemMetrics) },
@@ -291,7 +291,7 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 			r,
 			ctx2,
 			logger2,
-			r.global.config.Metrics.LFC,
+			r.global.config.Metrics.WithOverrides(vmInfo.Config.ScalingConfig).LFC,
 			metricsMgr[*core.LFCMetrics]{
 				kind:         "LFC",
 				emptyMetrics: func() *core.LFCMetrics { return new(core.LFCMetrics) },

@@ -386,7 +386,7 @@ type ScalingConfig struct {
 	// LFCUseLargestWindow, if true, calculates goal LFC size only based on the largest available
 	// working set size window, instead of trying to allow downscaling at earlier opportunities.
 	//
-	// This is not fit for general use. It's meant as a temproary escape hatch to let us assess the
+	// This is not fit for general use. It's meant as a temporary escape hatch to let us assess the
 	// upper bound of potential improvements to our LFC goal size heuristics.
 	LFCUseLargestWindow *bool `json:"lfcUseLargestWindow,omitempty"`
 
@@ -415,12 +415,25 @@ type ScalingConfig struct {
 	// means that stable zone will be from 0.75*load5 to 1.25*load5, and mixed zone will be
 	// from 0.6*load5 to 0.75*load5, and from 1.25*load5 to 1.4*load5.
 	CPUMixedZoneRatio *float64 `json:"cpuMixedZoneRatio,omitempty"`
+
+	// Port and Path of the metrics endpoint to get the LFC metrics from.
+	// These override the metrics.lfc.port/path settings from the global config.
+	//
+	// This is a feature flag. We will be slowly migrating to get the metrics from a new metrics
+	// exporter built-in to the neon extension, see
+	// https://github.com/neondatabase/neon/pull/12591. This allows us to test the new endpoint
+	// on some projects before making it the default.
+	LFCMetricsPort *uint16 `json:"lfcMetricsPort,omitempty"`
+	LFCMetricsPath string  `json:"lfcMetricsPath,omitempty"`
 }
 
 // WithOverrides returns a new copy of defaults, where fields set in overrides replace the ones in
 // defaults but all others remain the same.
 //
 // overrides may be nil; if so, this method just returns defaults.
+//
+// The LFCMetrics* fields in ScalingConfig override the settings in the global MetricsConfig, rather
+// than here. See agent.MetricsConfig.WithOverrides function.
 func (defaults ScalingConfig) WithOverrides(overrides *ScalingConfig) ScalingConfig {
 	if overrides == nil {
 		return defaults
