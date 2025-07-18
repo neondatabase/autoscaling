@@ -676,6 +676,31 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 				return err
 			}
 			log.Info("VM runner pod was deleted", "Pod.Namespace", vmRunner.Namespace, "Pod.Name", vmRunner.Name)
+
+			// If the runner has this VM as its owner, remove it.
+			// Otherwise, it's possible that deleting the VM will be blocked on a stalled pod
+			// deletion, even after the VM has already restarted & recovered.
+			//
+			// NOTE: It's only sound to do this AFTER marking the pod for deletion. Otherwise, if we
+			// failed to delete it after removing the owner reference, then it's possible that the
+			// VM could be marked for deletion before the next reconcile operation, and the runner pod
+			// would never be deleted.
+			if len(vmRunner.OwnerReferences) != 0 {
+				patchData, err := json.Marshal(patch.JSONPatch{
+					{
+						Op:   patch.OpRemove,
+						Path: "/metadata/ownerReferences",
+					},
+				})
+				if err != nil {
+					panic(fmt.Sprintf("failed to marshal JSON patch: %s", err))
+				}
+
+				err = r.Patch(ctx, vmRunner, client.RawPatch(types.JSONPatchType, patchData))
+				if err != nil && !apierrors.IsNotFound(err) {
+					return fmt.Errorf("failed to remove ownerReferences from runner pod after deletion: %w", err)
+				}
+			}
 		} else if !apierrors.IsNotFound(err) {
 			return err
 		}
