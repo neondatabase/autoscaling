@@ -256,3 +256,22 @@ func (c *Config) validate() error {
 
 	return ec.Resolve()
 }
+
+// Some of the settings in ScalingConfig override fields in MetricsConfig rather than in the global
+// default ScalingConfig. This function sets those.
+//
+// overrides may be nil; if so, this method just returns defaults.
+func (defaults MetricsConfig) WithOverrides(overrides *api.ScalingConfig) MetricsConfig {
+	if overrides == nil {
+		return defaults
+	}
+
+	if overrides.LFCMetricsPort != nil {
+		defaults.LFC.Port = *overrides.LFCMetricsPort
+	}
+	if overrides.LFCMetricsPath != "" {
+		defaults.LFC.Path = overrides.LFCMetricsPath
+	}
+
+	return defaults
+}

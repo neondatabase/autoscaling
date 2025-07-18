@@ -24,6 +24,8 @@ func Test_calculateGoalCU(t *testing.T) {
 		LFCMinWaitBeforeDownscaleMinutes: lo.ToPtr(5),
 		CPUStableZoneRatio:               lo.ToPtr(0.0),
 		CPUMixedZoneRatio:                lo.ToPtr(0.0),
+		LFCMetricsPort:                   "",
+		LFCMetricsPath:                   "",
 	}
 
 	warn := func(msg string) {}
