@@ -700,6 +700,7 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 				if err != nil && !apierrors.IsNotFound(err) {
 					return fmt.Errorf("failed to remove ownerReferences from runner pod after deletion: %w", err)
 				}
+				return nil // return early to avoid conflicts from double-reconciling.
 			}
 		} else if !apierrors.IsNotFound(err) {
 			return err
