@@ -63,11 +63,11 @@ func main() {
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM)
-	defer cancel()
 	ctx = srv.SetShutdownSignal(ctx)
 	ctx = srv.SetBaseContext(ctx)
 	ctx = srv.WithOrchestrator(ctx)
 	defer func() {
+		cancel()
 		if err := srv.GetOrchestrator(ctx).Wait(); err != nil {
 			logger.Panic("Failed to shut down orchestrator", zap.Error(err))
 		}
