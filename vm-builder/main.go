@@ -87,8 +87,10 @@ var (
 	forcePull = flag.Bool("pull", false, `Pull src image even if already present locally`)
 	version   = flag.Bool("version", false, `Print vm-builder version`)
 
-	daemonImageFlag = flag.String("daemon-image", "", `Specify the neonvm-daemon image: --daemon-image=neonvm-daemon:dev`)
-	targetArch      = flag.String("target-arch", "", fmt.Sprintf("Target architecture: --arch %s | %s", targetArchLinuxAmd64, targetArchLinuxArm64))
+	daemonImageFlag  = flag.String("daemon-image", "", `Specify the neonvm-daemon image: --daemon-image=neonvm-daemon:dev`)
+	alpineImageFlag  = flag.String("alpine-image", "alpine", `Specify the alpine image: --alpine-image=docker.io/library/alpine`)
+	busyboxImageFlag = flag.String("busybox-image", "busybox", `Specify the busybox image: --busybox-image=docker.io/library/busybox`)
+	targetArch       = flag.String("target-arch", "", fmt.Sprintf("Target architecture: --arch %s | %s", targetArchLinuxAmd64, targetArchLinuxArm64))
 )
 
 func AddTemplatedFileToTar(tw *tar.Writer, tmplArgs any, filename string, tmplString string) error {
@@ -130,8 +132,10 @@ type TemplatesContext struct {
 
 	NeonvmDaemonImage string
 
+	BusyboxImage    string
 	BusyboxImageTag string
 	BusyboxImageSha string
+	AlpineImage     string
 	AlpineImageTag  string
 	AlpineImageSha  string
 
@@ -160,6 +164,9 @@ func main() {
 		flag.PrintDefaults()
 		os.Exit(1)
 	}
+
+	alpineImage := *alpineImageFlag
+	busyboxImage := *busyboxImageFlag
 
 	if targetArch == nil || *targetArch == "" {
 		log.Println("Target architecture not set, see usage info:")
@@ -349,9 +356,11 @@ func main() {
 
 		NeonvmDaemonImage: neonvmDaemonImage,
 
+		BusyboxImage:    busyboxImage,
 		BusyboxImageTag: BusyboxImageTag,
 		BusyboxImageSha: getImageSha(*targetArch, BusyboxImageShaAmd64, BusyboxImageShaArm64),
 
+		AlpineImage:    alpineImage,
 		AlpineImageTag: AlpineImageTag,
 		AlpineImageSha: getImageSha(*targetArch, AlpineImageShaAmd64, AlpineImageShaArm64),
 
