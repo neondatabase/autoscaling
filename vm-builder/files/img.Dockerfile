@@ -9,17 +9,17 @@ USER root
 
 FROM {{.NeonvmDaemonImage}} AS neonvm-daemon-loader
 
-FROM busybox:{{.BusyboxImageTag}}{{.BusyboxImageSha}} AS busybox-loader
+FROM {{.BusyboxImage}}:{{.BusyboxImageTag}}{{.BusyboxImageSha}} AS busybox-loader
 
-FROM alpine:{{.AlpineImageTag}}{{.AlpineImageSha}} AS vm-runtime
+FROM {{.AlpineImage}}:{{.AlpineImageTag}}{{.AlpineImageSha}} AS vm-runtime
 ARG VM_BUILDER_TARGET_ARCH
-RUN set -e && mkdir -p /neonvm/bin /neonvm/runtime /neonvm/config 
+RUN set -e && mkdir -p /neonvm/bin /neonvm/runtime /neonvm/config
 # add busybox
 COPY --from=busybox-loader /bin/busybox /neonvm/bin/busybox
 
 RUN set -e \
     chmod +x /neonvm/bin/busybox \
-    && /neonvm/bin/busybox --install -s /neonvm/bin 
+    && /neonvm/bin/busybox --install -s /neonvm/bin
 
 COPY helper.move-bins.sh /helper.move-bins.sh
 
@@ -109,7 +109,7 @@ RUN set -e \
     && /neonvm/bin/id -g sshd > /dev/null 2>&1 || /neonvm/bin/addgroup sshd \
     && /neonvm/bin/id -u sshd > /dev/null 2>&1 || /neonvm/bin/adduser -D -H -G sshd -g 'sshd privsep' -s /neonvm/bin/nologin sshd
 
-FROM alpine:{{.AlpineImageTag}}{{.AlpineImageSha}} AS builder
+FROM {{.AlpineImage}}:{{.AlpineImageTag}}{{.AlpineImageSha}} AS builder
 ARG VM_BUILDER_DISK_SIZE
 COPY --from=rootdisk-mod / /rootdisk
 
@@ -128,5 +128,5 @@ RUN set -e \
     && mkfs.ext4 -L vmroot -d /rootdisk /disk.raw ${VM_BUILDER_DISK_SIZE} \
     && qemu-img convert -f raw -O qcow2 -o cluster_size=2M,lazy_refcounts=on /disk.raw /disk.qcow2
 
-FROM alpine:{{.AlpineImageTag}}{{.AlpineImageSha}}
+FROM {{.AlpineImage}}:{{.AlpineImageTag}}{{.AlpineImageSha}}
 COPY --from=builder /disk.qcow2 /
