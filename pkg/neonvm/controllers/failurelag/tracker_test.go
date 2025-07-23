@@ -42,6 +42,78 @@ func TestTracker(t *testing.T) {
 	assert.Equal(t, tracker.DegradedCount(), 0)
 }
 
+func TestFailureNotRetried(t *testing.T) {
+	now := newNowMock()
+	tracker := failurelag.NewTracker[string](10 * time.Minute)
+	tracker.Now = now.Now
+
+	// No failures yet
+	tracker.RecordFailure("key1")
+	assert.Equal(t, tracker.DegradedRetriedCount(), 0)
+	assert.Equal(t, tracker.DegradedNotRetriedCount(), 0)
+
+	// Not retried yet
+	now.Add(15 * time.Minute)
+	assert.Equal(t, tracker.DegradedRetriedCount(), 0)
+	assert.Equal(t, tracker.DegradedNotRetriedCount(), 1)
+
+	// Successful retry
+	tracker.RecordSuccess("key1")
+	assert.Equal(t, tracker.DegradedRetriedCount(), 0)
+	assert.Equal(t, tracker.DegradedNotRetriedCount(), 0)
+}
+
+func TestFailureRetried(t *testing.T) {
+	now := newNowMock()
+	tracker := failurelag.NewTracker[string](10 * time.Minute)
+	tracker.Now = now.Now
+
+	tracker.RecordFailure("key1")
+	assert.Equal(t, tracker.DegradedCount(), 0)
+
+	now.Add(5 * time.Minute)
+	tracker.RecordFailure("key1")
+
+	now.Add(7 * time.Minute)
+	assert.Equal(t, tracker.DegradedRetriedCount(), 1)
+	assert.Equal(t, tracker.DegradedNotRetriedCount(), 0)
+
+	tracker.RecordSuccess("key1")
+	assert.Equal(t, tracker.DegradedRetriedCount(), 0)
+	assert.Equal(t, tracker.DegradedNotRetriedCount(), 0)
+}
+
+func TestFailureRetriedAndNotRetried(t *testing.T) {
+	now := newNowMock()
+	tracker := failurelag.NewTracker[string](10 * time.Minute)
+	tracker.Now = now.Now
+
+	// No failures yet
+	tracker.RecordFailure("key1")
+	assert.Equal(t, tracker.DegradedRetriedCount(), 0)
+	assert.Equal(t, tracker.DegradedNotRetriedCount(), 0)
+
+	// Not retried yet
+	now.Add(15 * time.Minute)
+	assert.Equal(t, tracker.DegradedRetriedCount(), 0)
+	assert.Equal(t, tracker.DegradedNotRetriedCount(), 1)
+
+	// One failed retry
+	tracker.RecordFailure("key1")
+	assert.Equal(t, tracker.DegradedRetriedCount(), 1)
+	assert.Equal(t, tracker.DegradedNotRetriedCount(), 0)
+
+	// No retries again
+	now.Add(15 * time.Minute)
+	assert.Equal(t, tracker.DegradedRetriedCount(), 0)
+	assert.Equal(t, tracker.DegradedNotRetriedCount(), 1)
+
+	// Successful retry
+	tracker.RecordSuccess("key1")
+	assert.Equal(t, tracker.DegradedRetriedCount(), 0)
+	assert.Equal(t, tracker.DegradedNotRetriedCount(), 0)
+}
+
 func TestFailureSuccess(t *testing.T) {
 	now := newNowMock()
 	tracker := failurelag.NewTracker[string](10 * time.Minute)

@@ -38,6 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -51,6 +52,7 @@ import (
 
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/api"
+	"github.com/neondatabase/autoscaling/pkg/neonvm/controllers/reqchan"
 	"github.com/neondatabase/autoscaling/pkg/neonvm/ipam"
 	"github.com/neondatabase/autoscaling/pkg/util/gzip64"
 	"github.com/neondatabase/autoscaling/pkg/util/patch"
@@ -674,6 +676,32 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 				return err
 			}
 			log.Info("VM runner pod was deleted", "Pod.Namespace", vmRunner.Namespace, "Pod.Name", vmRunner.Name)
+
+			// If the runner has this VM as its owner, remove it.
+			// Otherwise, it's possible that deleting the VM will be blocked on a stalled pod
+			// deletion, even after the VM has already restarted & recovered.
+			//
+			// NOTE: It's only sound to do this AFTER marking the pod for deletion. Otherwise, if we
+			// failed to delete it after removing the owner reference, then it's possible that the
+			// VM could be marked for deletion before the next reconcile operation, and the runner pod
+			// would never be deleted.
+			if len(vmRunner.OwnerReferences) != 0 {
+				patchData, err := json.Marshal(patch.JSONPatch{
+					{
+						Op:   patch.OpRemove,
+						Path: "/metadata/ownerReferences",
+					},
+				})
+				if err != nil {
+					panic(fmt.Sprintf("failed to marshal JSON patch: %s", err))
+				}
+
+				err = r.Patch(ctx, vmRunner, client.RawPatch(types.JSONPatchType, patchData))
+				if err != nil && !apierrors.IsNotFound(err) {
+					return fmt.Errorf("failed to remove ownerReferences from runner pod after deletion: %w", err)
+				}
+				return nil // return early to avoid conflicts from double-reconciling.
+			}
 		} else if !apierrors.IsNotFound(err) {
 			return err
 		}
@@ -1613,15 +1641,23 @@ func podSpec(
 // SetupWithManager sets up the controller with the Manager.
 // Note that the Runner Pod will be also watched in order to ensure its
 // desirable state on the cluster
-func (r *VMReconciler) SetupWithManager(mgr ctrl.Manager) (ReconcilerWithMetrics, error) {
+func (r *VMReconciler) SetupWithManager(mgr ctrl.Manager, retryChan *reqchan.RequestChannel, forceRetryNotRetried bool) (ReconcilerWithMetrics, error) {
 	cntrlName := "virtualmachine"
+
+	var submitRequest func(reconcile.Request)
+	if forceRetryNotRetried {
+		submitRequest = retryChan.Add
+	}
+
 	reconciler := WithMetrics(
 		withCatchPanic(r),
 		r.Metrics,
 		cntrlName,
 		r.Config.FailurePendingPeriod,
 		r.Config.FailingRefreshInterval,
+		submitRequest,
 	)
+
 	err := ctrl.NewControllerManagedBy(mgr).
 		For(&vmv1.VirtualMachine{}).
 		Owns(&certv1.CertificateRequest{}).
@@ -1629,6 +1665,7 @@ func (r *VMReconciler) SetupWithManager(mgr ctrl.Manager) (ReconcilerWithMetrics
 		Owns(&corev1.Pod{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: r.Config.MaxConcurrentReconciles}).
 		Named(cntrlName).
+		WatchesRawSource(retryChan.Source()).
 		Complete(reconciler)
 	return reconciler, err
 }

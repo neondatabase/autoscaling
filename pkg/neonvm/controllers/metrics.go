@@ -26,9 +26,13 @@ type ReconcilerMetrics struct {
 	vmCreationToVMRunningTime      prometheus.Histogram
 	vmRestartCounts                prometheus.Counter
 	reconcileDuration              prometheus.HistogramVec
+	forceRetryCount                *prometheus.CounterVec
 }
 
-const OutcomeLabel = "outcome"
+const (
+	OutcomeLabel         = "outcome"
+	ActivelyRetriedLabel = "actively_retried"
+)
 
 func MakeReconcilerMetrics() ReconcilerMetrics {
 	// Copied bucket values from controller runtime latency metric. We can
@@ -50,7 +54,7 @@ func MakeReconcilerMetrics() ReconcilerMetrics {
 				Name: "reconcile_failing_objects",
 				Help: "Number of objects that are failing to reconcile for each specific controller",
 			},
-			[]string{"controller", OutcomeLabel},
+			[]string{"controller", OutcomeLabel, ActivelyRetriedLabel},
 		)),
 		vmCreationToRunnerCreationTime: util.RegisterMetric(metrics.Registry, prometheus.NewHistogram(
 			prometheus.HistogramOpts{
@@ -86,6 +90,12 @@ func MakeReconcilerMetrics() ReconcilerMetrics {
 				Buckets: buckets,
 			}, []string{OutcomeLabel},
 		)),
+		forceRetryCount: util.RegisterMetric(metrics.Registry, prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "reconcile_force_retry_count",
+				Help: "Total number of objects that were forcefully retried",
+			}, []string{OutcomeLabel},
+		)),
 	}
 	return m
 }
@@ -110,6 +120,7 @@ type wrappedReconciler struct {
 	Reconciler             reconcile.Reconciler
 	Metrics                ReconcilerMetrics
 	refreshFailingInterval time.Duration
+	submitRequest          func(reconcile.Request)
 
 	failing     *failurelag.Tracker[client.ObjectKey]
 	conflicting *failurelag.Tracker[client.ObjectKey]
@@ -152,6 +163,7 @@ func WithMetrics(
 	cntrlName string,
 	failurePendingPeriod time.Duration,
 	refreshFailingInterval time.Duration,
+	submitRequest func(reconcile.Request),
 ) ReconcilerWithMetrics {
 	return &wrappedReconciler{
 		Reconciler:             reconciler,
@@ -160,7 +172,15 @@ func WithMetrics(
 		failing:                failurelag.NewTracker[client.ObjectKey](failurePendingPeriod),
 		conflicting:            failurelag.NewTracker[client.ObjectKey](failurePendingPeriod),
 		refreshFailingInterval: refreshFailingInterval,
+		submitRequest:          submitRequest,
 	}
+}
+
+func (d *wrappedReconciler) refreshFailingMetrics(outcome ReconcileOutcome, tracker *failurelag.Tracker[client.ObjectKey]) {
+	d.Metrics.failing.WithLabelValues(d.ControllerName,
+		string(outcome), "true").Set(float64(tracker.DegradedRetriedCount()))
+	d.Metrics.failing.WithLabelValues(d.ControllerName,
+		string(outcome), "false").Set(float64(tracker.DegradedNotRetriedCount()))
 }
 
 func (d *wrappedReconciler) refreshFailing(
@@ -168,20 +188,26 @@ func (d *wrappedReconciler) refreshFailing(
 	outcome ReconcileOutcome,
 	tracker *failurelag.Tracker[client.ObjectKey],
 ) {
-	degraded := tracker.Degraded()
-	d.Metrics.failing.WithLabelValues(d.ControllerName, string(outcome)).
-		Set(float64(len(degraded)))
+	d.refreshFailingMetrics(outcome, tracker)
 
 	// Log each object on a separate line (even though we could just put them all on the same line)
 	// so that:
 	// 1. we avoid super long log lines (which can make log storage / querying unhappy), and
 	// 2. so that we can process it with Grafana Loki, which can't handle arrays
-	for _, obj := range degraded {
+	logFunc := func(obj client.ObjectKey, retried bool) {
 		log.Info(
 			fmt.Sprintf("Currently failing to reconcile %v object", d.ControllerName),
-			"outcome", outcome,
 			"object", obj,
+			OutcomeLabel, outcome,
+			ActivelyRetriedLabel, retried,
 		)
+	}
+	for _, obj := range tracker.DegradedRetried() {
+		logFunc(obj, true)
+	}
+
+	for _, obj := range tracker.DegradedNotRetried() {
+		logFunc(obj, false)
 	}
 }
 
@@ -195,7 +221,29 @@ func (d *wrappedReconciler) runRefreshFailing(ctx context.Context) {
 		case <-time.After(d.refreshFailingInterval):
 			d.refreshFailing(log, FailureOutcome, d.failing)
 			d.refreshFailing(log, ConflictOutcome, d.conflicting)
+
+			d.requeueNotRetried(ctx, d.failing.DegradedNotRetried(), FailureOutcome)
+			d.requeueNotRetried(ctx, d.conflicting.DegradedNotRetried(), ConflictOutcome)
 		}
+	}
+}
+
+// requeueNotRetried is a helper function that requeues all NotRetried objects in the failing
+// tracker.
+func (d *wrappedReconciler) requeueNotRetried(ctx context.Context, keys []client.ObjectKey, outcome ReconcileOutcome) {
+	if d.submitRequest == nil {
+		// requeue is disabled
+		return
+	}
+	log := log.FromContext(ctx)
+
+	for _, key := range keys {
+		log.Info("Requeuing NotRetried object",
+			"outcome", outcome,
+			"object", key,
+		)
+		d.submitRequest(reconcile.Request{NamespacedName: key})
+		d.Metrics.forceRetryCount.WithLabelValues(string(outcome)).Inc()
 	}
 }
 
@@ -247,10 +295,8 @@ func (d *wrappedReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		log.Info("Successful reconciliation", "duration", duration.String(), "requeueAfter", res.RequeueAfter)
 	}
 	d.Metrics.ObserveReconcileDuration(outcome, duration)
-	d.Metrics.failing.WithLabelValues(d.ControllerName,
-		string(FailureOutcome)).Set(float64(d.failing.DegradedCount()))
-	d.Metrics.failing.WithLabelValues(d.ControllerName,
-		string(ConflictOutcome)).Set(float64(d.conflicting.DegradedCount()))
+	d.refreshFailingMetrics(FailureOutcome, d.failing)
+	d.refreshFailingMetrics(ConflictOutcome, d.conflicting)
 
 	return res, err
 }
