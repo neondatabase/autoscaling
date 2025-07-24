@@ -53,12 +53,14 @@ func runProgram(logger *zap.Logger) (err error) {
 	// services and be able to more coherently wait for shutdown
 	// without needing a sleep.
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM)
-	defer cancel()
 	ctx = srv.SetShutdownSignal(ctx)
 	ctx = srv.WithOrchestrator(ctx)
 	ctx = srv.SetBaseContext(ctx)
 	orca := srv.GetOrchestrator(ctx)
-	defer func() { err = orca.Service().Wait() }()
+	defer func() {
+		cancel()
+		err = orca.Service().Wait()
+	}()
 
 	if err := orca.Add(srv.HTTP("scheduler-pprof", time.Second, util.MakePPROF("0.0.0.0:7777"))); err != nil {
 		return err

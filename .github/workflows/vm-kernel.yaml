@@ -258,11 +258,22 @@ jobs:
           date="$(date -u '+%FT%TZ')"
           echo "suffix=-neon-$commit-$date" | tee -a $GITHUB_OUTPUT
 
+      - name: Load base image tags and SHAs into env
+        uses: ./.github/actions/deps-versions
+        with:
+          arch: ${{ matrix.arch }}
+
       - name: build linux kernel
         id: build-linux-kernel
         uses: docker/build-push-action@471d1dc4e07e5cdedd4c2171150001c434f0b7a4 # v6.15.0
         with:
           build-args: |
+            UBUNTU_IMG_TAG=${{ env.UBUNTU_IMG_TAG }}
+            UBUNTU_IMG_SHA=${{ env.UBUNTU_IMG_SHA }}
+            ALPINE_IMG_TAG=${{ env.ALPINE_IMG_TAG }}
+            ALPINE_IMG_SHA=${{ env.ALPINE_IMG_SHA }}
+            ALPINE_IMG_SHA_AMD64=${{ env.ALPINE_IMG_SHA_AMD64 }}
+            ALPINE_IMG_SHA_ARM64=${{ env.ALPINE_IMG_SHA_ARM64 }}
             KERNEL_VERSION=${{ needs.get-tags.outputs.kernel_version_tag }}
             VERSION_SUFFIX=${{ steps.generate-version-suffix.outputs.suffix }}
           context: neonvm-kernel
