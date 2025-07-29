@@ -7,59 +7,59 @@ on:
       # otherwise the follow-up job that needs it wouldn't be able to run. So instead we pretend the
       # job completed successfully, but actually do nothing...
       skip:
-        description: 'Changes this action to perform a no-op'
+        description: "Changes this action to perform a no-op"
         type: boolean
         required: false
       tag:
-        description: 'Tag to use for the Docker images'
+        description: "Tag to use for the Docker images"
         type: string
         required: true
       kernel-image:
-        description: 'Kernel image for the VMs embedded in neonvm-runner. If not specified, a kernel will be built from source'
+        description: "Kernel image for the VMs embedded in neonvm-runner. If not specified, a kernel will be built from source"
         type: string
         required: false
       upload-to-ecr-acr:
-        description: 'Should images be uploaded to neon ECR'
+        description: "Should images be uploaded to neon ECR"
         type: boolean
         required: false
       archs:
-        description: 'Architectures to build for'
+        description: "Architectures to build for"
         type: string
         required: false
         default: '["amd64","arm64"]'
 
     outputs:
       controller:
-        description: 'neonvm-controller image'
+        description: "neonvm-controller image"
         value: ${{ jobs.tags.outputs.controller }}
       vxlan-controller:
-        description: 'neonvm-vxlan-controller image'
+        description: "neonvm-vxlan-controller image"
         value: ${{ jobs.tags.outputs.vxlan-controller }}
       runner:
-        description: 'neonvm-runner image'
+        description: "neonvm-runner image"
         value: ${{ jobs.tags.outputs.runner }}
       scheduler:
-        description: 'autoscale-scheduler image'
+        description: "autoscale-scheduler image"
         value: ${{ jobs.tags.outputs.scheduler }}
       autoscaler-agent:
-        description: 'autoscaler-agent image'
+        description: "autoscaler-agent image"
         value: ${{ jobs.tags.outputs.autoscaler-agent }}
       daemon:
-        description: 'neonvm-daemon image'
+        description: "neonvm-daemon image"
         value: ${{ jobs.tags.outputs.daemon }}
       cluster-autoscaler:
-        description: 'cluster-autoscaler image'
+        description: "cluster-autoscaler image"
         value: ${{ jobs.tags.outputs.cluster-autoscaler }}
 
 env:
-  IMG_CONTROLLER:         "neonvm-controller"
-  IMG_VXLAN_CONTROLLER:   "neonvm-vxlan-controller"
-  IMG_RUNNER:             "neonvm-runner"
-  IMG_SCHEDULER:          "autoscale-scheduler"
-  IMG_AUTOSCALER_AGENT:   "autoscaler-agent"
-  IMG_DAEMON:             "neonvm-daemon"
+  IMG_CONTROLLER: "neonvm-controller"
+  IMG_VXLAN_CONTROLLER: "neonvm-vxlan-controller"
+  IMG_RUNNER: "neonvm-runner"
+  IMG_SCHEDULER: "autoscale-scheduler"
+  IMG_AUTOSCALER_AGENT: "autoscaler-agent"
+  IMG_DAEMON: "neonvm-daemon"
   IMG_CLUSTER_AUTOSCALER: "cluster-autoscaler-neonvm"
-  GHCR_REGISTRY:          "ghcr.io/neondatabase"
+  GHCR_REGISTRY: "ghcr.io/neondatabase"
 
 defaults:
   run:
@@ -70,12 +70,12 @@ jobs:
   # itself still succeeds, while not doing anything when called by the release workflow.
   tags:
     outputs:
-      controller:         ${{ steps.show-tags.outputs.controller }}
-      vxlan-controller:   ${{ steps.show-tags.outputs.vxlan-controller }}
-      runner:             ${{ steps.show-tags.outputs.runner }}
-      scheduler:          ${{ steps.show-tags.outputs.scheduler }}
-      autoscaler-agent:   ${{ steps.show-tags.outputs.autoscaler-agent }}
-      daemon:             ${{ steps.show-tags.outputs.daemon }}
+      controller: ${{ steps.show-tags.outputs.controller }}
+      vxlan-controller: ${{ steps.show-tags.outputs.vxlan-controller }}
+      runner: ${{ steps.show-tags.outputs.runner }}
+      scheduler: ${{ steps.show-tags.outputs.scheduler }}
+      autoscaler-agent: ${{ steps.show-tags.outputs.autoscaler-agent }}
+      daemon: ${{ steps.show-tags.outputs.daemon }}
       cluster-autoscaler: ${{ steps.show-tags.outputs.cluster-autoscaler }}
     runs-on: ubuntu-latest
     steps:
@@ -107,7 +107,7 @@ jobs:
   build:
     # nb: use format(..) to catch both inputs.skip = true AND inputs.skip = 'true'.
     if: ${{ format('{0}', inputs.skip) != 'true' }}
-    needs: [ vm-kernel ]
+    needs: [vm-kernel]
     env:
       # Why localhost? We use a local registry so that when docker/build-push-action tries to pull the
       # image we built locally, it'll actually have a place to pull from.
@@ -116,8 +116,8 @@ jobs:
       # See https://github.com/moby/buildkit/issues/2343 for more information.
       GO_BASE_IMG: ${{ format('localhost:5000/neondatabase/autoscaling-go-base-{0}:dev', matrix.arch) }}
     permissions:
-      contents: read  # This is required for actions/checkout
-      packages: write  # required for pushing to GHCR
+      contents: read # This is required for actions/checkout
+      packages: write # required for pushing to GHCR
     strategy:
       matrix:
         arch: ${{ fromJson(inputs.archs) }}
@@ -150,7 +150,7 @@ jobs:
 
       - uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b # v5.4.0
         with:
-          go-version-file: 'go.mod'
+          go-version-file: "go.mod"
           # Disable cache on self-hosted runners to avoid /usr/bin/tar errors, see https://github.com/actions/setup-go/issues/403
           cache: false
         # Sometimes setup-go gets stuck. Without this, it'll keep going until the job gets killed
@@ -349,8 +349,8 @@ jobs:
           context: cluster-autoscaler
           push: true
           tags: ${{ steps.tags.outputs.cluster-autoscaler }}
-          cache-from: ${{ format('type=registry,ref=cache.neon.build/cluster-autoscaler-neonvm-{0}:cache', matrix.arch) }}
-          cache-to: ${{ github.ref_name == 'main' && format('type=registry,ref=cache.neon.build/cluster-autoscaler-neonvm-{0}:cache,mode=max', matrix.arch) || '' }}
+          # cache-from: ${{ format('type=registry,ref=cache.neon.build/cluster-autoscaler-neonvm-{0}:cache', matrix.arch) }}
+          # cache-to: ${{ github.ref_name == 'main' && format('type=registry,ref=cache.neon.build/cluster-autoscaler-neonvm-{0}:cache,mode=max', matrix.arch) || '' }}
           platform: linux/${{ matrix.arch }}
           build-args: |
             DISTROLESS_IMG_TAG=${{ env.DISTROLESS_IMG_TAG }}
@@ -359,7 +359,7 @@ jobs:
   merge-images:
     permissions:
       packages: write # required for pushing to GHCR
-    needs: [ build ]
+    needs: [build]
     runs-on: ubuntu-22.04
     steps:
       - name: Harden Runner
@@ -400,7 +400,7 @@ jobs:
           done
 
   generate-image-maps:
-    needs: [ build ]
+    needs: [build]
     runs-on: ubuntu-22.04
     outputs:
       dev: ${{ steps.generate.outputs.dev }}
@@ -421,13 +421,12 @@ jobs:
         run: python3 .github/scripts/generate_image_maps.py
         env:
           # note: excludes neonvm-daemon because we only need it during CI, to build compute images.
-          COMPONENTS:
-            '["${{ env.IMG_CONTROLLER }}",
-              "${{ env.IMG_VXLAN_CONTROLLER }}",
-              "${{ env.IMG_RUNNER }}",
-              "${{ env.IMG_SCHEDULER }}",
-              "${{ env.IMG_AUTOSCALER_AGENT }}",
-              "${{ env.IMG_CLUSTER_AUTOSCALER }}"]'
+          COMPONENTS: '["${{ env.IMG_CONTROLLER }}",
+            "${{ env.IMG_VXLAN_CONTROLLER }}",
+            "${{ env.IMG_RUNNER }}",
+            "${{ env.IMG_SCHEDULER }}",
+            "${{ env.IMG_AUTOSCALER_AGENT }}",
+            "${{ env.IMG_CLUSTER_AUTOSCALER }}"]'
           SOURCE_TAG: "${{ inputs.tag }}"
           TARGET_TAG: "${{ inputs.tag }}"
           DEV_ACR: "${{ vars.AZURE_DEV_REGISTRY_NAME }}"
@@ -438,11 +437,11 @@ jobs:
 
   push-to-dev:
     if: ${{ format('{0}', inputs.upload-to-ecr-acr) == 'true' }}
-    needs: [ merge-images, generate-image-maps ]
+    needs: [merge-images, generate-image-maps]
 
     permissions:
-      id-token: write  # Required for aws/azure login
-      packages: write  # required for pushing to GHCR
+      id-token: write # Required for aws/azure login
+      packages: write # required for pushing to GHCR
 
     uses: ./.github/workflows/_push-to-container-registry.yml
     secrets: inherit
@@ -458,11 +457,11 @@ jobs:
 
   push-to-prod:
     if: ${{ format('{0}', inputs.upload-to-ecr-acr) == 'true' }}
-    needs: [ merge-images, generate-image-maps ]
+    needs: [merge-images, generate-image-maps]
 
     permissions:
-      id-token: write  # Required for aws/azure login
-      packages: write  # required for pushing to GHCR
+      id-token: write # Required for aws/azure login
+      packages: write # required for pushing to GHCR
 
     uses: ./.github/workflows/_push-to-container-registry.yml
     secrets: inherit
