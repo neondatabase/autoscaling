@@ -12,7 +12,7 @@ COPY ca.commit ca.commit
 
 # Download the repo. It's... quite large, but thankfully this should get cached
 RUN git clone -b `cat ca.branch` https://github.com/kubernetes/autoscaler
-RUN CA_GIT_TAG=`cat ca.commit` cd autoscaler && git reset --hard $CA_GIT_TAG
+RUN CA_GIT_TAG=`cat ca.commit` && cd autoscaler && git reset --hard $CA_GIT_TAG
 
 # Only ADD the patch after downloading, to avoid wrecking the cache
 COPY ca.patch ca.patch
