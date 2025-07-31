@@ -224,8 +224,9 @@ jobs:
         uses: docker/build-push-action@471d1dc4e07e5cdedd4c2171150001c434f0b7a4 # v6.15.0
         id: build-go-dependencies-image
         with:
-          provenance: false
-          sbom: false
+          attests: |
+            type=provenance,mode=max
+            type=sbom,generator=docker.io/docker/buildkit-syft-scanner:1
           context: .
           push: true
           file: go-base.Dockerfile
@@ -240,8 +241,9 @@ jobs:
       - name: Build and push neonvm-runner image
         uses: docker/build-push-action@471d1dc4e07e5cdedd4c2171150001c434f0b7a4 # v6.15.0
         with:
-          provenance: false
-          sbom: false
+          attests: |
+            type=provenance,mode=max
+            type=sbom,generator=docker.io/docker/buildkit-syft-scanner:1
           context: .
           push: true
           file: neonvm-runner/Dockerfile
@@ -260,8 +262,9 @@ jobs:
       - name: Build and push neonvm-controller image
         uses: docker/build-push-action@471d1dc4e07e5cdedd4c2171150001c434f0b7a4 # v6.15.0
         with:
-          provenance: false
-          sbom: false
+          attests: |
+            type=provenance,mode=max
+            type=sbom,generator=docker.io/docker/buildkit-syft-scanner:1
           context: .
           push: true
           file: neonvm-controller/Dockerfile
@@ -277,8 +280,9 @@ jobs:
       - name: Build and push neonvm-vxlan-controller image
         uses: docker/build-push-action@471d1dc4e07e5cdedd4c2171150001c434f0b7a4 # v6.15.0
         with:
-          provenance: false
-          sbom: false
+          attests: |
+            type=provenance,mode=max
+            type=sbom,generator=docker.io/docker/buildkit-syft-scanner:1
           context: .
           push: true
           file: neonvm-vxlan-controller/Dockerfile
@@ -295,8 +299,9 @@ jobs:
       - name: Build and push autoscale-scheduler image
         uses: docker/build-push-action@471d1dc4e07e5cdedd4c2171150001c434f0b7a4 # v6.15.0
         with:
-          provenance: false
-          sbom: false
+          attests: |
+            type=provenance,mode=max
+            type=sbom,generator=docker.io/docker/buildkit-syft-scanner:1
           context: .
           push: true
           file: autoscale-scheduler/Dockerfile
@@ -312,8 +317,9 @@ jobs:
       - name: Build and push autoscaler-agent image
         uses: docker/build-push-action@471d1dc4e07e5cdedd4c2171150001c434f0b7a4 # v6.15.0
         with:
-          provenance: false
-          sbom: false
+          attests: |
+            type=provenance,mode=max
+            type=sbom,generator=docker.io/docker/buildkit-syft-scanner:1
           context: .
           push: true
           file: autoscaler-agent/Dockerfile
@@ -329,8 +335,9 @@ jobs:
       - name: Build and push neonvm-daemon image
         uses: docker/build-push-action@471d1dc4e07e5cdedd4c2171150001c434f0b7a4 # v6.15.0
         with:
-          provenance: false
-          sbom: false
+          attests: |
+            type=provenance,mode=max
+            type=sbom,generator=docker.io/docker/buildkit-syft-scanner:1
           context: .
           push: true
           file: neonvm-daemon/Dockerfile
@@ -344,8 +351,9 @@ jobs:
       - name: Build and push cluster-autoscaler image
         uses: docker/build-push-action@471d1dc4e07e5cdedd4c2171150001c434f0b7a4 # v6.15.0
         with:
-          provenance: false
-          sbom: false
+          attests: |
+            type=provenance,mode=max
+            type=sbom,generator=docker.io/docker/buildkit-syft-scanner:1
           context: cluster-autoscaler
           push: true
           tags: ${{ steps.tags.outputs.cluster-autoscaler }}
