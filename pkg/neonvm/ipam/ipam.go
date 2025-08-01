@@ -42,7 +42,7 @@ const (
 	DatastoreRetriesDelay = 100 * time.Millisecond
 )
 
-var ErrAgain = errors.New("IPAM concurrency limit reached. Try again later.")
+var ErrAgain = errors.New("IPAM concurrency limit reached, try again later")
 
 type Temporary interface {
 	Temporary() bool

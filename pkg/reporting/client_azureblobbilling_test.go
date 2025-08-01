@@ -79,7 +79,7 @@ func TestAzureClient_send(t *testing.T) {
 				require.Error(t, o.err)
 				var azErr AzureError
 				require.ErrorAs(t, o.err, &azErr)
-				rErr := &azcore.ResponseError{}
+				rErr := &azcore.ResponseError{} //nolint:exhaustruct // It's part of Azure SDK
 				require.ErrorAs(t, o.err, &rErr)
 				require.Equal(t, 404, rErr.StatusCode)
 			},
@@ -88,7 +88,7 @@ func TestAzureClient_send(t *testing.T) {
 			name: "can write then read it",
 			when: func(t *testing.T, i *input) {
 				_, err := i.client.client.CreateContainer(i.ctx, i.cfg.Container,
-					&azblob.CreateContainerOptions{},
+					&azblob.CreateContainerOptions{}, //nolint:exhaustruct // It's part of Azure SDK
 				)
 				require.NoError(t, err)
 			},
@@ -97,7 +97,7 @@ func TestAzureClient_send(t *testing.T) {
 				b := make([]byte, 1000)
 				const expectedText = "hello, billing data is here"
 				read, err := o.c.client.DownloadBuffer(o.ctx, "test-container", "test-blob-name", b,
-					&azblob.DownloadBufferOptions{},
+					&azblob.DownloadBufferOptions{}, //nolint:exhaustruct // It's part of Azure SDK
 				)
 				b = b[0:read]
 				require.NoError(t, err)
