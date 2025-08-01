@@ -1,0 +1,11 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: kube-system
+
+resources:
+- tcpdump-daemonset.yaml
+- tcpdump-capture-configmap.yaml
+- analyzer-configmap.yaml
+- analyzer-server-configmap.yaml
+- capture-analyzer.yaml
