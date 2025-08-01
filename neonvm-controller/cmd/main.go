@@ -150,12 +150,8 @@ func main() {
 	}
 
 	ipam, err := ipam.New(ipam.IPAMParams{
-		NadName:      rc.NADConfig.IPAMName,
-		NadNamespace: rc.NADConfig.IPAMNamespace,
-
-		// Let's not have more than a quarter of reconcilliation workers stuck
-		// at IPAM mutex.
-		ConcurrencyLimit: max(1, cli.concurrencyLimit/4),
+		NADName:      rc.NADConfig.IPAMName,
+		NADNamespace: rc.NADConfig.IPAMNamespace,
 
 		MetricsReg: metrics.Registry,
 	})
@@ -163,7 +159,10 @@ func main() {
 		setupLog.Error(err, "unable to create ipam")
 		panic(err)
 	}
-	defer ipam.Close()
+	if err := mgr.Add(ipam); err != nil {
+		setupLog.Error(err, "unable to add ipam")
+		panic(err)
+	}
 
 	retryChan := reqchan.NewRequestChannel()
 	defer retryChan.Close()
