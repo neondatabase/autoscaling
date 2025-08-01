@@ -2,11 +2,11 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
   name: autoscale-scheduler-virtualmachine-editor
-  namespace: kube-system
+  namespace: neonvm-system
 subjects:
 - kind: ServiceAccount
   name: autoscale-scheduler
-  namespace: kube-system
+  namespace: neonvm-system
 roleRef:
   kind: ClusterRole
   name: neonvm-virtualmachine-editor-role
@@ -16,11 +16,11 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
   name: autoscale-scheduler-virtualmachinemigration-editor
-  namespace: kube-system
+  namespace: neonvm-system
 subjects:
 - kind: ServiceAccount
   name: autoscale-scheduler
-  namespace: kube-system
+  namespace: neonvm-system
 roleRef:
   kind: ClusterRole
   name: neonvm-virtualmachinemigration-editor-role
@@ -33,7 +33,7 @@ metadata:
 subjects:
 - kind: ServiceAccount
   name: autoscale-scheduler
-  namespace: kube-system
+  namespace: neonvm-system
 roleRef:
   kind: ClusterRole
   name: system:kube-scheduler
@@ -46,7 +46,7 @@ metadata:
 subjects:
 - kind: ServiceAccount
   name: autoscale-scheduler
-  namespace: kube-system
+  namespace: neonvm-system
 roleRef:
   kind: ClusterRole
   name: system:volume-scheduler
@@ -56,11 +56,11 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: autoscale-scheduler-apiserver-auth-config
-  namespace: kube-system
+  namespace: kube-system # namespace should be kube-system because role extension-apiserver-authentication-reader is there
 subjects:
 - kind: ServiceAccount
   name: autoscale-scheduler
-  namespace: kube-system
+  namespace:  neonvm-system
 roleRef:
   kind: Role
   apiGroup: rbac.authorization.k8s.io
