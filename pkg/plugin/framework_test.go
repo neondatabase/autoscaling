@@ -20,7 +20,8 @@ func TestNormalizeScoreRandomization(t *testing.T) {
 	registry := prometheus.NewRegistry()
 
 	// Create a metrics plugin using the exported BuildPluginMetrics function
-	metricsPlugin := metrics.BuildPluginMetrics(registry, nil)
+	reconcileWorkers := 1
+	metricsPlugin := metrics.BuildPluginMetrics(registry, nil, reconcileWorkers)
 
 	// Create a minimal enforcer with just enough dependencies to not crash
 	//nolint:exhaustruct // Only initializing fields needed for the test
@@ -110,7 +111,8 @@ func TestMultipleNormalizeScoreRuns(t *testing.T) {
 	registry := prometheus.NewRegistry()
 
 	// Create a metrics plugin using the exported BuildPluginMetrics function
-	metricsPlugin := metrics.BuildPluginMetrics(registry, nil)
+	reconcileWorkers := 1
+	metricsPlugin := metrics.BuildPluginMetrics(registry, nil, reconcileWorkers)
 
 	// Create a minimal enforcer with just enough dependencies to not crash
 	//nolint:exhaustruct // Only initializing fields needed for the test
