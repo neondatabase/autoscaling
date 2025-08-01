@@ -641,7 +641,7 @@ status-fluent-bit: kubectl
 
 .PHONY: deploy-container-image-csi-driver
 deploy-container-image-csi-driver: kubectl
-	$(KUBECTL) apply -f k3s-containerd-v2.0.1.yaml
+	$(KUBECTL) apply -f container-image-csi-driver.yaml
 	$(KUBECTL) -n kube-system rollout status daemonset container-image-csi-driver
 
 ##@ Build Dependencies
