@@ -147,3 +147,5 @@ merge: |
   COPY --from=libcgroup-builder /libcgroup-install/sbin/* /usr/sbin/
   COPY --from=postgres-exporter /bin/postgres_exporter /bin/postgres_exporter
   COPY --from=pgbouncer         /usr/local/pgbouncer/bin/pgbouncer /usr/local/bin/pgbouncer
+
+  RUN apt update && apt install --no-install-recommends -y curl
