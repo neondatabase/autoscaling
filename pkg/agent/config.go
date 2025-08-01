@@ -25,6 +25,9 @@ type Config struct {
 	Monitor   MonitorConfig    `json:"monitor"`
 	NeonVM    NeonVMConfig     `json:"neonvm"`
 	DumpState *DumpStateConfig `json:"dumpState"`
+	
+	DeadlockCheckerDelayMillis uint `json:"deadlockCheckerDelayMillis"`
+	DeadlockCheckerTimeoutSeconds uint `json:"deadlockCheckerTimeoutSeconds"`
 }
 
 type RateThresholdConfig struct {
@@ -65,6 +68,7 @@ type MonitorConfig struct {
 	// RequestedUpscaleValidSeconds gives the duration, in seconds, that requested upscaling should
 	// be respected for, before allowing re-downscaling.
 	RequestedUpscaleValidSeconds uint `json:"requestedUpscaleValidSeconds"`
+	HealthCheckIntervalSeconds uint `json:"healthCheckIntervalSeconds"`
 }
 
 // DumpStateConfig configures the endpoint to dump all internal state
@@ -242,6 +246,7 @@ func (c *Config) validate() error {
 	erc.Whenf(ec, c.Monitor.RetryDeniedDownscaleSeconds == 0, zeroTmpl, ".monitor.retryDeniedDownscaleSeconds")
 	erc.Whenf(ec, c.Monitor.RequestedUpscaleValidSeconds == 0, zeroTmpl, ".monitor.requestedUpscaleValidSeconds")
 	erc.Whenf(ec, c.Monitor.MaxFailedRequestRate.IntervalSeconds == 0, zeroTmpl, ".monitor.maxFailedRequestRate.intervalSeconds")
+	erc.Whenf(ec, c.Monitor.HealthCheckIntervalSeconds == 0, zeroTmpl, ".monitor.healthCheckIntervalSeconds")
 	// add all errors if there are any: https://github.com/neondatabase/autoscaling/pull/195#discussion_r1170893494
 	ec.Add(c.Scaling.DefaultConfig.ValidateDefaults())
 	erc.Whenf(ec, c.Scheduler.RequestPort == 0, zeroTmpl, ".scheduler.requestPort")
@@ -250,6 +255,8 @@ func (c *Config) validate() error {
 	erc.Whenf(ec, c.Scheduler.RetryFailedRequestSeconds == 0, zeroTmpl, ".scheduler.retryFailedRequestSeconds")
 	erc.Whenf(ec, c.Scheduler.RetryDeniedUpscaleSeconds == 0, zeroTmpl, ".scheduler.retryDeniedUpscaleSeconds")
 	erc.Whenf(ec, c.Scheduler.SchedulerName == "", emptyTmpl, ".scheduler.schedulerName")
+	erc.Whenf(ec, c.DeadlockCheckerDelayMillis == 0, zeroTmpl, ".deadlockCheckerDelayMillis")
+	erc.Whenf(ec, c.DeadlockCheckerTimeoutSeconds == 0, zeroTmpl, ".deadlockCheckerTimeoutSeconds")
 	erc.Whenf(ec, c.Scheduler.MaxFailedRequestRate.IntervalSeconds == 0, zeroTmpl, ".monitor.maxFailedRequestRate.intervalSeconds")
 
 	return ec.Resolve()
