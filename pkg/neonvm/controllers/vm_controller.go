@@ -958,7 +958,7 @@ func updatePodMetadataIfNecessary(ctx context.Context, c client.Client, vm *vmv1
 
 	patchData, err := json.Marshal(patches)
 	if err != nil {
-		panic(fmt.Errorf("error marshalling JSON patch: %w", err))
+		panic(fmt.Errorf("error marshaling JSON patch: %w", err))
 	}
 
 	if len(removedMessageParts) != 0 {
@@ -993,7 +993,7 @@ func extractVirtualMachineUsageJSON(spec vmv1.VirtualMachineSpec) string {
 
 	usageJSON, err := json.Marshal(usage)
 	if err != nil {
-		panic(fmt.Errorf("error marshalling JSON: %w", err))
+		panic(fmt.Errorf("error marshaling JSON: %w", err))
 	}
 
 	return string(usageJSON)
@@ -1002,7 +1002,7 @@ func extractVirtualMachineUsageJSON(spec vmv1.VirtualMachineSpec) string {
 func extractVirtualMachineResourcesJSON(spec vmv1.VirtualMachineSpec) string {
 	resourcesJSON, err := json.Marshal(spec.Resources())
 	if err != nil {
-		panic(fmt.Errorf("error marshalling JSON: %w", err))
+		panic(fmt.Errorf("error marshaling JSON: %w", err))
 	}
 
 	return string(resourcesJSON)
@@ -1015,7 +1015,7 @@ func extractVirtualMachineOvercommitSettingsJSON(spec vmv1.VirtualMachineSpec) *
 
 	settingsJSON, err := json.Marshal(*spec.Overcommit)
 	if err != nil {
-		panic(fmt.Errorf("error marshalling JSON: %w", err))
+		panic(fmt.Errorf("error marshaling JSON: %w", err))
 	}
 	return lo.ToPtr(string(settingsJSON))
 }
