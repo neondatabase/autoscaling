@@ -151,7 +151,7 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 		return &vm, nil
 	}
 
-	if !migration.ObjectMeta.DeletionTimestamp.IsZero() {
+	if !migration.DeletionTimestamp.IsZero() {
 		// The object is being deleted
 		if controllerutil.ContainsFinalizer(migration, virtualmachinemigrationFinalizer) {
 			// our finalizer is present, so lets handle any external dependency

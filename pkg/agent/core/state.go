@@ -317,7 +317,7 @@ func (s *state) nextActions(now time.Time) ActionSet {
 	// ----
 	// Requests to NeonVM:
 	var pluginRequested *api.Resources
-	var pluginRequestedPhase string = "<this string should not appear>"
+	pluginRequestedPhase := "<this string should not appear>"
 	if s.Plugin.OngoingRequest {
 		pluginRequested = &s.Plugin.LastRequest.Resources
 		pluginRequestedPhase = "ongoing"

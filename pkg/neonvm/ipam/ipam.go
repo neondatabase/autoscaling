@@ -357,7 +357,7 @@ func (i *IPAM) getNeonvmIPPool(ctx context.Context, ipRange string) (*NeonvmIPPo
 	}
 
 	return &NeonvmIPPool{
-		vmClient: i.Client.VMClient,
+		vmClient: i.VMClient,
 		pool:     pool,
 		firstip:  ip,
 	}, nil

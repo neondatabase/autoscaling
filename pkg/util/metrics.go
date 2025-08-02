@@ -25,7 +25,7 @@ func StartPrometheusMetricsServer(ctx context.Context, logger *zap.Logger, port 
 	// server's.
 	listener, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.IPv4zero, Port: int(port)})
 	if err != nil {
-		return fmt.Errorf("Error listening on TCP port %d: %w", port, err)
+		return fmt.Errorf("error listening on TCP port %d: %w", port, err)
 	}
 
 	shutdownCtx, shutdown := context.WithCancel(ctx)

@@ -47,7 +47,7 @@ func setupVMDisks(
 	if enableSSH {
 		name := "ssh-authorized-keys"
 		if err := createISO9660FromPath(logger, name, sshAuthorizedKeysDiskPath, sshAuthorizedKeysMountPoint); err != nil {
-			return nil, fmt.Errorf("Failed to create ISO9660 image: %w", err)
+			return nil, fmt.Errorf("failed to create ISO9660 image: %w", err)
 		}
 		qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=cdrom,cache=none", name, sshAuthorizedKeysDiskPath))
 	}
@@ -56,7 +56,7 @@ func setupVMDisks(
 		dPath := fmt.Sprintf("%s/swapdisk.qcow2", mountedDiskPath)
 		logger.Info("creating QCOW2 image for swap", zap.String("diskPath", dPath))
 		if err := createSwap(dPath, swapSize); err != nil {
-			return nil, fmt.Errorf("Failed to create swap disk: %w", err)
+			return nil, fmt.Errorf("failed to create swap disk: %w", err)
 		}
 		qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=disk,%s,discard=unmap", swapName, dPath, diskCacheSettings))
 	}
@@ -67,7 +67,7 @@ func setupVMDisks(
 			logger.Info("creating QCOW2 image with empty ext4 filesystem", zap.String("diskName", disk.Name))
 			dPath := fmt.Sprintf("%s/%s.qcow2", mountedDiskPath, disk.Name)
 			if err := createQCOW2(disk.Name, dPath, &disk.EmptyDisk.Size, nil); err != nil {
-				return nil, fmt.Errorf("Failed to create QCOW2 image: %w", err)
+				return nil, fmt.Errorf("failed to create QCOW2 image: %w", err)
 			}
 			discard := ""
 			if disk.EmptyDisk.Discard {
@@ -79,7 +79,7 @@ func setupVMDisks(
 			mnt := fmt.Sprintf("/vm/mounts%s", disk.MountPath)
 			logger.Info("creating iso9660 image", zap.String("diskPath", dPath), zap.String("diskName", disk.Name), zap.String("mountPath", mnt))
 			if err := createISO9660FromPath(logger, disk.Name, dPath, mnt); err != nil {
-				return nil, fmt.Errorf("Failed to create ISO9660 image: %w", err)
+				return nil, fmt.Errorf("failed to create ISO9660 image: %w", err)
 			}
 			qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=cdrom,cache=none", disk.Name, dPath))
 		default:

@@ -30,7 +30,7 @@ func getEnvVar(err *error, require_nonempty bool, varName string) string {
 
 	s := os.Getenv(varName)
 	if s == "" && require_nonempty {
-		*err = fmt.Errorf("Missing %s in environment", varName)
+		*err = fmt.Errorf("missing %s in environment", varName)
 	}
 
 	return s

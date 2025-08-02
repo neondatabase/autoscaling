@@ -273,14 +273,14 @@ func connectToMonitor(
 	if err != nil {
 		logger.Error("Failed to read monitor response", zap.Error(err))
 		failureReason = websocket.StatusProtocolError
-		return nil, nil, fmt.Errorf("Error reading vm-monitor response during protocol handshake: %w", err)
+		return nil, nil, fmt.Errorf("error reading vm-monitor response during protocol handshake: %w", err)
 	}
 
 	logger.Info("Got monitor version response", zap.Any("response", resp))
 	if resp.Error != nil {
 		logger.Error("Got error response from vm-monitor", zap.Any("response", resp), zap.String("error", *resp.Error))
 		failureReason = websocket.StatusProtocolError
-		return nil, nil, fmt.Errorf("Monitor returned error during protocol handshake: %q", *resp.Error)
+		return nil, nil, fmt.Errorf("monitor returned error during protocol handshake: %q", *resp.Error)
 	}
 
 	logger.Info("negotiated protocol version with monitor", zap.Any("response", resp), zap.String("version", resp.Version.String()))
@@ -438,19 +438,19 @@ func (disp *Dispatcher) HandleMessage(
 	// avoids this, and we manually deserialize later
 	var message json.RawMessage
 	if err := wsjson.Read(ctx, disp.conn, &message); err != nil {
-		return fmt.Errorf("Error receiving message: %w", err)
+		return fmt.Errorf("error receiving message: %w", err)
 	}
 
 	logger.Debug("(pre-decoding): received a message", zap.ByteString("message", message))
 
 	var unstructured map[string]interface{}
 	if err := json.Unmarshal(message, &unstructured); err != nil {
-		return fmt.Errorf("Error deserializing message: %q", string(message))
+		return fmt.Errorf("error deserializing message: %q", string(message))
 	}
 
 	typeStr, err := extractField[string](unstructured, "type")
 	if err != nil {
-		return fmt.Errorf("Error extracting 'type' field: %w", err)
+		return fmt.Errorf("error extracting 'type' field: %w", err)
 	}
 
 	// go thinks all json numbers are float64 so we first deserialize to that to

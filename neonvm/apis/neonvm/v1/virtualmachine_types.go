@@ -239,7 +239,7 @@ func (p *CpuScalingMode) FlagFunc(value string) error {
 	}
 
 	if !slices.Contains(possibleValues, value) || value == "" {
-		return fmt.Errorf("Unknown CpuScalingMode %q, must be one of %v", value, possibleValues)
+		return fmt.Errorf("unknown CpuScalingMode %q, must be one of %v", value, possibleValues)
 	}
 
 	*p = CpuScalingMode(value)
@@ -456,11 +456,9 @@ func (m MilliCPU) MarshalJSON() ([]byte, error) {
 func (m MilliCPU) Format(state fmt.State, verb rune) {
 	switch {
 	case verb == 'v' && state.Flag('#'):
-		//nolint:errcheck // can't do anything about the write error
-		state.Write([]byte(fmt.Sprintf("%v", uint32(m))))
+		fmt.Fprintf(state, "%v", uint32(m))
 	default:
-		//nolint:errcheck // can't do anything about the write error
-		state.Write([]byte(fmt.Sprintf("%v", m.AsFloat64())))
+		fmt.Fprintf(state, "%v", m.AsFloat64())
 	}
 }
 
