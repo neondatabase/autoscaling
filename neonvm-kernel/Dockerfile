@@ -13,7 +13,7 @@ RUN set -e \
     && test -n "${KERNEL_VERSION}" \
     && echo "force this as a requirement for build-kernel-deps" > /build/arg-check-succeeded
 
-FROM ubuntu:$UBUNTU_IMG_TAG$UBUNTU_IMG_SHA AS build-deps
+FROM ubuntu:$UBUNTU_IMG_TAG$UBUNTU_IMG_SHA AS build-kernel-deps
 WORKDIR /build
 
 RUN apt-get update && apt-get -y install \
@@ -25,6 +25,8 @@ RUN apt-get update && apt-get -y install \
     flex \
     bison \
     libelf-dev \
+    dwarves \
+    pahole \
     bc \
     libssl-dev \
     python3 \
@@ -91,6 +93,8 @@ ADD linux-config-amd64-${KERNEL_VERSION} linux-${KERNEL_VERSION}/.config
 ARG VERSION_SUFFIX
 RUN cd linux-${KERNEL_VERSION} \
     && make ARCH=x86_64 CROSS_COMPILE=x86_64-linux-gnu- EXTRAVERSION="$VERSION_SUFFIX" -j `nproc` \
+    && make ARCH=x86_64 CROSS_COMPILE=x86_64-linux-gnu- prepare -j `nproc` \
+    && make ARCH=x86_64 CROSS_COMPILE=x86_64-linux-gnu- headers -j `nproc` \
     && make ARCH=x86_64 CROSS_COMPILE=x86_64-linux-gnu- modules_prepare -j `nproc` \
     && make ARCH=x86_64 CROSS_COMPILE=x86_64-linux-gnu- modules -j `nproc` \
     && ls -l && ls -l kernel \
@@ -125,6 +129,8 @@ ARG KERNEL_VERSION
 ADD linux-config-aarch64-${KERNEL_VERSION} linux-${KERNEL_VERSION}/.config
 RUN cd linux-${KERNEL_VERSION} \
     && make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- EXTRAVERSION="$VERSION_SUFFIX" -j `nproc` \
+    && make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- prepare -j `nproc` \
+    && make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- headers -j `nproc` \
     && make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- modules_prepare -j `nproc` \
     && make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- modules -j `nproc` \
     && ls -l && ls -l kernel \

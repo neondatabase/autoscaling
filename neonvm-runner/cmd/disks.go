@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"math"
 	"os"
 	"os/exec"
@@ -417,44 +418,49 @@ func createISO9660FromPath(logger *zap.Logger, diskName string, diskPath string,
 	}
 	defer writer.Cleanup() //nolint:errcheck // Nothing to do with the error, maybe log it ? TODO
 
-	dir, err := os.Open(contentPath)
-	if err != nil {
-		return err
-	}
-	dirEntrys, err := dir.ReadDir(0)
-	if err != nil {
-		return err
-	}
-
-	for _, file := range dirEntrys {
-		fileName := fmt.Sprintf("%s/%s", contentPath, file.Name())
-		outputPath := file.Name()
-
-		if file.IsDir() {
-			continue
+	err = filepath.WalkDir(contentPath, func(filePath string, d fs.DirEntry, err error) error {
+		if err != nil {
+			logger.Info("Couldn't walk through dir", zap.String("path", filePath), zap.Error(err))
+			return err
 		}
+
+		if d.IsDir() {
+			// Skip directories, we only want to add files.
+			logger.Info("Skipping subdir", zap.String("path", filePath))
+			return nil
+		}
+
 		// try to resolve symlink and check resolved file IsDir
-		resolved, err := filepath.EvalSymlinks(fileName)
+		resolved, err := filepath.EvalSymlinks(filePath)
 		if err != nil {
-			return err
+			logger.Info("Couldn't eval symlinks", zap.String("path", filePath), zap.Error(err))
+			// return err
+			return nil
 		}
-		resolvedOpen, err := os.Open(resolved)
+
+		resolvedStat, err := os.Stat(resolved)
 		if err != nil {
-			return err
-		}
-		resolvedStat, err := resolvedOpen.Stat()
-		if err != nil {
+			logger.Info("Couldn't stat", zap.String("path", filePath), zap.String("resolvedPath", resolved), zap.Error(err))
 			return err
 		}
 		if resolvedStat.IsDir() {
-			continue
+			logger.Info("Skipping resolved directory", zap.String("path", filePath), zap.String("resolvedPath", resolved))
+			return nil
 		}
+
+		// Calculate the relative path for the ISO (preserving directory structure)
+		relPath, err := filepath.Rel(contentPath, filePath)
+		if err != nil {
+			logger.Info("Failed to get relative path", zap.String("filePath", filePath), zap.Error(err))
+			return err
+		}
+		outputPath := relPath // Use relative path to maintain directory structure in ISO
 
 		// run the file handling logic in a closure, so the defers happen within the loop body,
 		// rather than the outer function.
 		err = func() error {
 			logger.Info("adding file to ISO9660 disk", zap.String("path", outputPath))
-			fileToAdd, err := os.Open(fileName)
+			fileToAdd, err := os.Open(filePath)
 			if err != nil {
 				return err
 			}
@@ -465,6 +471,12 @@ func createISO9660FromPath(logger *zap.Logger, diskName string, diskPath string,
 		if err != nil {
 			return err
 		}
+
+		return nil
+	})
+
+	if err != nil {
+		return err
 	}
 
 	outputFile, err := os.OpenFile(diskPath, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0o644)

@@ -370,7 +370,7 @@ kernel: ## Build linux kernel.
 	rm -f neonvm-kernel/vmlinuz; \
 	rm -rf neonvm-kernel/tools; \
 	kernel_version="$$(neonvm-kernel/echo-version.sh)"; \
-	version_suffix="-local-$$(date -u '+%FT%TZ')-$$(git describe --dirty)"; \
+	version_suffix="-$$(git describe --tags --dirty= --always)"; \
 	docker buildx build \
 		--tag neonvm-kernel:dev \
 		--build-arg UBUNTU_IMG_TAG=$(UBUNTU_IMG_TAG) \
