@@ -1137,12 +1137,13 @@ func (r *VMReconciler) certSecretForVirtualMachine(
 // labelsForVirtualMachine returns the labels for selecting the resources
 // More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/common-labels/
 func labelsForVirtualMachine(vm *vmv1.VirtualMachine) map[string]string {
-	l := make(map[string]string, len(vm.Labels)+3)
+	l := make(map[string]string, len(vm.Labels)+4)
 	for k, v := range vm.Labels {
 		l[k] = v
 	}
 
 	l["app.kubernetes.io/name"] = "NeonVM"
+	l["app"] = "neonvm-runner"
 	l[vmv1.VirtualMachineNameLabel] = vm.Name
 	return l
 }
@@ -1153,7 +1154,7 @@ func annotationsForVirtualMachine(vm *vmv1.VirtualMachine) map[string]string {
 		"kubectl.kubernetes.io/last-applied-configuration": true,
 	}
 
-	a := make(map[string]string, len(vm.Annotations)+2)
+	a := make(map[string]string, len(vm.Annotations)+4)
 	for k, v := range vm.Annotations {
 		if !ignored[k] {
 			a[k] = v
@@ -1166,6 +1167,11 @@ func annotationsForVirtualMachine(vm *vmv1.VirtualMachine) map[string]string {
 	if ann := extractVirtualMachineOvercommitSettingsJSON(vm.Spec); ann != nil {
 		a[vmv1.VirtualMachineOvercommitAnnotation] = *ann
 	}
+	
+	// Add log daemon annotations
+	a["enableLogDaemon"] = "true"
+	a["logDaemonDockerLoggingGroup"] = "docker-common-log-group"
+	
 	return a
 }
 
