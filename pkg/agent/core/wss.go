@@ -84,7 +84,7 @@ func EstimateTrueWorkingSetSize(
 // increases in demand?".
 func ProjectNextHighest(series []float64, projectLen float64) float64 {
 	if len(series) < 2 {
-		panic(fmt.Errorf("Cannot ProjectNextHighest with series of length %d (must be >= 2)", len(series)))
+		panic(fmt.Errorf("cannot ProjectNextHighest with series of length %d (must be >= 2)", len(series)))
 	}
 
 	highest := series[0]

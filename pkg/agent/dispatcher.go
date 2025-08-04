@@ -457,7 +457,7 @@ func (disp *Dispatcher) HandleMessage(
 	// avoid the type error, then cast to uint64
 	f, err := extractField[float64](unstructured, "id")
 	if err != nil {
-		return fmt.Errorf("Error extracting 'id field: %w", err)
+		return fmt.Errorf("error extracting 'id field: %w", err)
 	}
 	id := uint64(*f)
 
@@ -504,8 +504,8 @@ func (disp *Dispatcher) HandleMessage(
 	// Helper function to handle common unmarshalling logic
 	unmarshal := func(value any) error {
 		if err := json.Unmarshal(message, value); err != nil {
-			rootErr = errors.New("Failed unmarshaling JSON")
-			err := fmt.Errorf("Error unmarshaling %s: %w", *typeStr, err)
+			rootErr = errors.New("failed unmarshaling JSON")
+			err := fmt.Errorf("error unmarshaling %s: %w", *typeStr, err)
 			logger.Error(rootErr.Error(), zap.Error(err))
 			// we're already on the error path anyways
 			_ = disp.send(ctx, logger, id, api.InvalidMessage{Error: err.Error()})
@@ -555,7 +555,7 @@ func (disp *Dispatcher) HandleMessage(
 		logger.Warn("Received notification we sent an invalid message", zap.Any("warning", warning))
 		return nil
 	default:
-		rootErr = errors.New("Received unknown message type")
+		rootErr = errors.New("received unknown message type")
 		return disp.send(
 			ctx,
 			logger,
@@ -706,7 +706,7 @@ func (disp *Dispatcher) run(ctx context.Context, logger *zap.Logger, upscaleRequ
 				logger.Warn("Error handling message", zap.Error(err))
 			} else {
 				logger.Error("Error handling message, shutting down connection", zap.Error(err))
-				err = fmt.Errorf("Error handling message: %w", err)
+				err = fmt.Errorf("error handling message: %w", err)
 				// note: in theory we *could* be more descriptive with these statuses, but the only
 				// consumer of this API is the vm-monitor, and it doesn't check those.
 				//
