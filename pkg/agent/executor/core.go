@@ -196,6 +196,15 @@ func (c ExecutorCoreUpdater) ResetMonitor(withLock func()) {
 	})
 }
 
+// ScaleRequested calls (*core.State).Monitor().ScaleRequested(...) on the inner core.State and
+// runs withLock while holding the lock.
+func (c ExecutorCoreUpdater) ScaleRequested(resources api.Allocation, withLock func()) {
+	c.core.update(func(state *core.State) {
+		state.Monitor().ScaleRequested(time.Now(), resources)
+		withLock()
+	})
+}
+
 // UpscaleRequested calls (*core.State).Monitor().UpscaleRequested(...) on the inner core.State and
 // runs withLock while holding the lock.
 func (c ExecutorCoreUpdater) UpscaleRequested(resources api.MoreResources, withLock func()) {
