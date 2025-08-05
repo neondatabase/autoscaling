@@ -54,11 +54,13 @@ data:
       "metrics": {
         "system": {
           "port": 9100,
+          "path": "/metrics",
           "requestTimeoutSeconds": 2,
           "secondsBetweenRequests": 5
         },
         "lfc": {
           "port": 9499,
+          "path": "/metrics",
           "requestTimeoutSeconds": 5,
           "secondsBetweenRequests": 15
         }

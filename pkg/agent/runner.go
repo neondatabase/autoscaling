@@ -689,7 +689,7 @@ func doMetricsRequest(
 	metrics core.FromPrometheus,
 	config MetricsSourceConfig,
 ) error {
-	url := fmt.Sprintf("http://%s:%d/metrics", r.podIP, config.Port)
+	url := fmt.Sprintf("http://%s:%d%s", r.podIP, config.Port, config.Path)
 
 	timeout := time.Second * time.Duration(config.RequestTimeoutSeconds)
 	reqCtx, cancel := context.WithTimeout(ctx, timeout)
