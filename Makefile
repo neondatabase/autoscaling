@@ -567,6 +567,10 @@ e2e: check-local-context e2e-tools ## Run e2e kuttl tests
 .PHONY: run-e2e
 run-e2e: deploy vm-examples e2e ## Helper target to do all steps to run e2e tests locally
 
+.PHONY: goe2e
+goe2e: check-local-context ## Run Go-based e2e tests
+	cd tests/goe2e && go test -v ./...
+
 ##@ Local kind cluster
 
 .PHONY: kind-setup
