@@ -253,7 +253,7 @@ func (i *IPAM) runIPAMRange(ctx context.Context, ipRange RangeConfiguration, act
 		case <-ctx.Done():
 			return net.IPNet{}, ctx.Err()
 		default:
-			// live in retry loop until context not cancelled
+			// live in retry loop until context not canceled
 		}
 
 		// read IPPool from ipppols.vm.neon.tech custom resource

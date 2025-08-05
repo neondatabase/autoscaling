@@ -324,7 +324,7 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 	r.spawnBackgroundWorker(ctx, execLogger.Named("vm-monitor-downscale"), "executor: vm-monitor downscale", ecwc.DoMonitorDownscales)
 	r.spawnBackgroundWorker(ctx, execLogger.Named("vm-monitor-upscale"), "executor: vm-monitor upscale", ecwc.DoMonitorUpscales)
 
-	// Note: Run doesn't terminate unless the parent context is cancelled - either because the VM
+	// Note: Run doesn't terminate unless the parent context is canceled - either because the VM
 	// pod was deleted, or the autoscaler-agent is exiting.
 	select {
 	case <-ctx.Done():
@@ -742,7 +742,7 @@ func (r *Runner) doNeonVMRequest(
 
 	patchPayload, err := json.Marshal(patches)
 	if err != nil {
-		panic(fmt.Errorf("Error marshalling JSON patch: %w", err))
+		panic(fmt.Errorf("Error marshaling JSON patch: %w", err))
 	}
 
 	timeout := time.Second * time.Duration(r.global.config.NeonVM.RequestTimeoutSeconds)
