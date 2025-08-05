@@ -54,7 +54,7 @@ func NewAutoscaleEnforcerPlugin(
 	promReg := prometheus.NewRegistry()
 	metrics.RegisterDefaultCollectors(promReg)
 
-	pluginMetrics := metrics.BuildPluginMetrics(promReg, config.NodeMetricLabels)
+	pluginMetrics := metrics.BuildPluginMetrics(promReg, config.NodeMetricLabels, config.ReconcileWorkers)
 
 	// pre-define this so that we can reference it in the handlers, knowing that it won't be used
 	// until we start the workers (which we do *after* we've set this value).
@@ -81,6 +81,7 @@ func NewAutoscaleEnforcerPlugin(
 		reconcile.WithBaseContext(ctx),
 		reconcile.WithMiddleware(initEvents),
 		reconcile.WithQueueWaitDurationCallback(pluginMetrics.Reconcile.QueueWaitDurationCallback),
+		reconcile.WithQueueSizeCallback(pluginMetrics.Reconcile.QueueSizeCallback),
 		reconcile.WithResultCallback(pluginMetrics.Reconcile.ResultCallback),
 		reconcile.WithErrorStatsCallback(func(params reconcile.ObjectParams, stats reconcile.ErrorStats) {
 			pluginMetrics.Reconcile.ErrorStatsCallback(params, stats)

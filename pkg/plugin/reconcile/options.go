@@ -16,6 +16,7 @@ type queueSettings struct {
 	baseContext    context.Context
 	middleware     []Middleware
 	waitCallback   QueueWaitDurationCallback
+	sizeCallback   QueueSizeCallback
 	resultCallback ResultCallback
 	errorCallback  ErrorStatsCallback
 	panicCallback  PanicCallback
@@ -26,6 +27,7 @@ func defaultQueueSettings() *queueSettings {
 		baseContext:    context.Background(),
 		middleware:     []Middleware{},
 		waitCallback:   nil,
+		sizeCallback:   nil,
 		resultCallback: nil,
 		errorCallback:  nil,
 		panicCallback:  nil,
@@ -64,6 +66,23 @@ func WithQueueWaitDurationCallback(cb QueueWaitDurationCallback) QueueOption {
 	return QueueOption{
 		apply: func(s *queueSettings) {
 			s.waitCallback = cb
+		},
+	}
+}
+
+// QueueSizeCallback represents the signature of the callback that may be provided to add
+// observability to the ongoing length of the queue.
+//
+// Whenever the number of queued items changes, this function will be called with the new length of
+// the queue (potentially zero, if there are no items).
+type QueueSizeCallback = func(size int)
+
+// WithQueueSizeCallback sets the QueueSizeCallback that will be called with the current size of the
+// queue whenever the number of waiting items changes.
+func WithQueueSizeCallback(cb QueueSizeCallback) QueueOption {
+	return QueueOption{
+		apply: func(s *queueSettings) {
+			s.sizeCallback = cb
 		},
 	}
 }
