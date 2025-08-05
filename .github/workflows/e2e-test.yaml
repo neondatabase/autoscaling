@@ -181,6 +181,8 @@ jobs:
         env:
           USE_REGISTRIES_FILE: true
 
+      - run: make deploy-container-image-csi-driver
+
       - name: deploy components
         timeout-minutes: 3
         run: |
