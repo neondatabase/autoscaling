@@ -1,3 +1,4 @@
+# More info on config here: https://golangci-lint.run/usage/configuration/
 version: "2"
 run:
   issues-exit-code: 1
@@ -7,6 +8,7 @@ output:
       path: stdout
       print-linter-name: true
       print-issued-lines: true
+
 linters:
   enable:
     - asciicheck
@@ -23,13 +25,8 @@ linters:
     - unparam
   settings:
     dupword:
-      keywords:
-        - a
-        - and
-        - at
-        - for
-        - from
-        - the
+      # only enable a few common cases here. Typically, duplicated words will be short
+      keywords: ["a", "and", "at", "for", "from", "the"]
     exhaustruct:
       exclude:
         - ^crypto/tls\.Config$
@@ -54,10 +51,10 @@ linters:
         - ^github\.com/containerd/cgroups/v3/cgroup2\.(CPU|Resources)
         - ^github\.com/docker/docker/api/types/container\.Config$
         - ^github\.com/docker/docker/api/types\.\w+Options$
-        - ^github\.com/opencontainers/runtime-spec/specs-go\.\w+$
+        - ^github\.com/opencontainers/runtime-spec/specs-go\.\w+$ # Exempt the entire package. Too many big structs.
         - ^github\.com/prometheus/client_golang/prometheus(/.*)?\.\w+Opts$
         - ^github\.com/tychoish/fun/pubsub\.BrokerOptions$
-        - ^github\.com/vishvananda/netlink\.\w+$
+        - ^github\.com/vishvananda/netlink\.\w+$ # Exempt the entire package. Too many big structs.
         - ^github\.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1\.VirtualMachine(Migration)?(Spec)?$
         - ^github\.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1\.IPPool$
         - ^github\.com/neondatabase/autoscaling/pkg/agent/core\.ActionSet$
@@ -84,7 +81,7 @@ linters:
       - legacy
       - std-error-handling
     rules:
-      - path: (.+)\.go$
+      - path: (.+)\.go$ # ChanMutex contains only a channel, which *is* safe to copy
         text: 'copylocks: .* copies lock value.*: github\.com/neondatabase/autoscaling/pkg/util\.ChanMutex'
     paths:
       - third_party$
