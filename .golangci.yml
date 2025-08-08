@@ -61,6 +61,7 @@ linters:
         - ^github\.com/neondatabase/autoscaling/pkg/util/patch\.Operation$
         - ^github\.com/neondatabase/autoscaling/pkg/util/watch\.HandlerFuncs$
         - ^github\.com/cert-manager/cert-manager/pkg/apis/certmanager/v1\.Certificate(Request)?(Spec)?$
+        - ^github\.com/Azure/azure-sdk-for-go/sdk/.*$ # Exempt all packages in the SDK, objects have a lot of extra fields.
     gocritic:
       enabled-checks:
         - commentedOutImport
