@@ -138,11 +138,16 @@ To run the end-to-end tests, you need to have [`kuttl`] installed. You can run t
 make e2e
 ```
 
+### `make run-e2e`
+
+During active development, when the kernel is already built and cluster created, one can do `make run-e2e` to test current code, which resolves to `make deploy vm-examples e2e`.
+
+
 ## Contributing
 
 Splitting PRs into commits is preferred, as it allows for cleaner git history and makes the review easier.
 
-For all commits, we require PR number to be present in the commit subject, like that:
+For all commits, we require PR number to be present in the commit subject:
 ```
   neonvm: Remove neonvm-runner version [2/2] (#1381)
                                              ^ like that
