@@ -68,7 +68,7 @@ func (s *cpuServer) handleGetCPUStatus(w http.ResponseWriter) {
 	}
 	w.WriteHeader(http.StatusOK)
 
-	if _, err := w.Write([]byte(fmt.Sprintf("%d", activeCPUs*1000))); err != nil {
+	if _, err := fmt.Fprintf(w, "%d", activeCPUs*1000); err != nil {
 		s.logger.Error("could not write response", zap.Error(err))
 	}
 }
@@ -196,26 +196,29 @@ func (s *cpuServer) handleUploadFile(w http.ResponseWriter, r *http.Request, pat
 func (s *cpuServer) run(addr string) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/cpu", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet {
+		switch r.Method {
+		case http.MethodGet:
 			s.handleGetCPUStatus(w)
 			return
-		} else if r.Method == http.MethodPut {
+		case http.MethodPut:
 			s.handleSetCPUStatus(w, r)
 			return
-		} else {
+		default:
 			// unknown method
 			w.WriteHeader(http.StatusNotFound)
+			return
 		}
 	})
 	mux.HandleFunc("/files/{path...}", func(w http.ResponseWriter, r *http.Request) {
 		path := fmt.Sprintf("/%s", r.PathValue("path"))
-		if r.Method == http.MethodGet {
+		switch r.Method {
+		case http.MethodGet:
 			s.handleGetFileChecksum(w, r, path)
 			return
-		} else if r.Method == http.MethodPut {
+		case http.MethodPut:
 			s.handleUploadFile(w, r, path)
 			return
-		} else {
+		default:
 			// unknown method
 			w.WriteHeader(http.StatusNotFound)
 		}

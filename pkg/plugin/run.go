@@ -119,11 +119,11 @@ func (s *PluginState) startPermitHandler(
 	logger.Info("Starting resource request server")
 	hs := srv.HTTP("resource-request", 5*time.Second, &http.Server{Addr: "0.0.0.0:10299", Handler: mux})
 	if err := hs.Start(ctx); err != nil {
-		return fmt.Errorf("Error starting resource request server: %w", err)
+		return fmt.Errorf("error starting resource request server: %w", err)
 	}
 
 	if err := orca.Add(hs); err != nil {
-		return fmt.Errorf("Error adding resource request server to orchestrator: %w", err)
+		return fmt.Errorf("error adding resource request server to orchestrator: %w", err)
 	}
 	return nil
 }
@@ -150,12 +150,12 @@ func (s *PluginState) handleAgentRequest(
 	}
 
 	if !req.ProtoVersion.IsValid() {
-		return nil, 400, fmt.Errorf("Invalid protocol version %v", req.ProtoVersion)
+		return nil, 400, fmt.Errorf("invalid protocol version %v", req.ProtoVersion)
 	}
 	reqProtoRange := req.ProtocolRange()
 	if _, ok := expectedProtoRange.LatestSharedVersion(reqProtoRange); !ok {
 		return nil, 400, fmt.Errorf(
-			"Protocol version mismatch: Need %v but got %v", expectedProtoRange, reqProtoRange,
+			"protocol version mismatch: need %v but got %v", expectedProtoRange, reqProtoRange,
 		)
 	}
 

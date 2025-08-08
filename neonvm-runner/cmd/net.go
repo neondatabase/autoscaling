@@ -44,7 +44,7 @@ func setupVMNetworks(logger *zap.Logger, ports []vmv1.Port, extraNetwork *vmv1.E
 	// default (pod) net details
 	macDefault, err := defaultNetwork(logger, defaultNetworkCIDR, ports)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to set up default network: %w", err)
+		return nil, fmt.Errorf("failed to set up default network: %w", err)
 	}
 	qemuCmd = append(qemuCmd, "-netdev", fmt.Sprintf("tap,id=default,ifname=%s,queues=4,script=no,downscript=no,vhost=on", defaultNetworkTapName))
 	qemuCmd = append(qemuCmd, "-device", fmt.Sprintf("virtio-net-pci,mq=on,vectors=10,netdev=default,mac=%s", macDefault.String()))
@@ -53,7 +53,7 @@ func setupVMNetworks(logger *zap.Logger, ports []vmv1.Port, extraNetwork *vmv1.E
 	if extraNetwork != nil && extraNetwork.Enable {
 		macOverlay, err := overlayNetwork(extraNetwork.Interface)
 		if err != nil {
-			return nil, fmt.Errorf("Failed to set up overlay network: %w", err)
+			return nil, fmt.Errorf("failed to set up overlay network: %w", err)
 		}
 		qemuCmd = append(qemuCmd, "-netdev", fmt.Sprintf("tap,id=overlay,ifname=%s,queues=4,script=no,downscript=no,vhost=on", overlayNetworkTapName))
 		qemuCmd = append(qemuCmd, "-device", fmt.Sprintf("virtio-net-pci,mq=on,vectors=10,netdev=overlay,mac=%s", macOverlay.String()))

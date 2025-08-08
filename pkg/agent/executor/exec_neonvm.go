@@ -9,7 +9,6 @@ import (
 	vmv1 "github.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1"
 	"github.com/neondatabase/autoscaling/pkg/agent/core"
 	"github.com/neondatabase/autoscaling/pkg/api"
-	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
 type NeonVMInterface interface {
@@ -23,8 +22,8 @@ type NeonVMInterface interface {
 
 func (c *ExecutorCoreWithClients) DoNeonVMRequests(ctx context.Context, logger *zap.Logger) {
 	var (
-		updates     util.BroadcastReceiver = c.updates.NewReceiver()
-		ifaceLogger *zap.Logger            = logger.Named("client")
+		updates     = c.updates.NewReceiver()
+		ifaceLogger = logger.Named("client")
 	)
 
 	for {

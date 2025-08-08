@@ -189,7 +189,7 @@ func run(logger *zap.Logger) error {
 		return fmt.Errorf("failed to unmarshal VM Status: %w", err)
 	}
 
-	enableSSH := false
+	var enableSSH bool
 	if vmSpec.EnableSSH != nil && *vmSpec.EnableSSH {
 		enableSSH = true
 	}

@@ -1,118 +1,108 @@
 # More info on config here: https://golangci-lint.run/usage/configuration/
+version: "2"
 run:
-  timeout: 5m
   issues-exit-code: 1
-
-issues:
-  exclude:
-    # ChanMutex contains only a channel, which *is* safe to copy
-    - 'copylocks: .* copies lock value.*: github\.com/neondatabase/autoscaling/pkg/util\.ChanMutex'
-
 output:
   formats:
-   - format: "colored-line-number"
-  print-issued-lines: true
-  print-linter-name: true
-  sort-results: true
+    text:
+      path: stdout
+      print-linter-name: true
+      print-issued-lines: true
 
 linters:
   enable:
-    # enabled by default:
-    - errcheck    # unchecked error values
-    - gosimple    # simplifications
-    - govet       # various items, see: https://pkg.go.dev/cmd/vet
-    - ineffassign # detects unused assignments
-    - staticcheck # some rules from staticcheck.io
-    - typecheck   # typechecks code, like the compiler
-    - unused      # checks for unused constants/variables/functions/types
-    - gofumpt     # Formatter.
-
-    # explicitly enabled:
-    - asciicheck       # all identifiers are ASCII
-    - bidichk          # no Unicode bidi sequences as per CVE-2021-42574
-    - bodyclose        # HTTP response bodies are closed
-    - copyloopvar      # detects places where loop variables are copied
-    - dupword          # things like 'the the' in comments/strings
-    - durationcheck    # bad time.Duration arithmetic
-    - errorlint        # common errors with Go 1.13+ error wrapping
-    - exhaustruct      # all struct fields are initialized
-    - gci              # deterministic import ordering
-    - gocritic         # lots of small checks, see <https://go-critic.com/overview>
-    - noctx            # HTTP requests are passed a Context
-    - nolintlint       # bad "nolint" directives
-    - predeclared      # no identifiers in Go's list of predeclared identifiers, see <https://go.dev/ref/spec#Predeclared_identifiers>
-    - unparam          # no unused function parameters or return values
-
-linters-settings:
-  # see: <https://golangci-lint.run/usage/linters/#dupword>, <https://github.com/Abirdcfly/dupword>
-  dupword:
-    # only enable a few common cases here. Typically, duplicated words will be short
-    keywords: ["a", "and", "at", "for", "from", "the"]
-
-  # see: <https://golangci-lint.run/usage/linters/#exhaustruct>
-  exhaustruct:
-    exclude:
-      - '^crypto/tls\.Config$'
-      - '^net/http\.(Client|Server)'
-      - '^net\.(Dialer|TCPAddr)$'
-      - '^archive/tar\.Header$'
-      - '^k8s\.io/api/core/v1\.\w+$'
-      - '^k8s\.io/apimachinery/pkg/api/resource\.Quantity$'
-      # metav1.{CreateOptions,GetOptions,ListOptions,WatchOptions,PatchOptions,UpdateOptions,DeleteOptions}
-      - '^k8s\.io/apimachinery/pkg/apis/meta/v1\.(Create|Get|List|Watch|Patch|Update|Delete)Options$'
-      - '^k8s\.io/apimachinery/pkg/apis/meta/v1\.(Condition|LabelSelector|ObjectMeta)$'
-      - '^k8s\.io/client-go/tools/leaderelection/resourcelock\.ResourceLockConfig$'
-      - '^k8s\.io/client-go/tools/leaderelection\.(LeaderCallbacks|LeaderElectionConfig)$'
-      - '^sigs\.k8s\.io/controller-runtime/pkg/client\.Options$'
-      - '^sigs\.k8s\.io/controller-runtime/pkg/controller\.Options$'
-      - '^sigs\.k8s\.io/controller-runtime/pkg/envtest\.(Environment|WebhookInstallOptions)$'
-      - '^sigs\.k8s\.io/controller-runtime/pkg/manager\.Options$'
-      - '^sigs\.k8s\.io/controller-runtime/pkg/metrics/server\.Options'
-      - '^sigs\.k8s\.io/controller-runtime/pkg/reconcile\.Result$'
-      - '^sigs\.k8s\.io/controller-runtime/pkg/scheme\.Builder$'
-      - '^sigs\.k8s\.io/controller-runtime/pkg/webhook\.Options'
-      - '^github\.com/containerd/cgroups/v3/cgroup2\.(CPU|Resources)'
-      - '^github\.com/docker/docker/api/types/container\.Config$'
-      - '^github\.com/docker/docker/api/types\.\w+Options$'
-      - '^github\.com/opencontainers/runtime-spec/specs-go\.\w+$' # Exempt the entire package. Too many big structs.
-      - '^github\.com/prometheus/client_golang/prometheus(/.*)?\.\w+Opts$'
-      - '^github\.com/tychoish/fun/pubsub\.BrokerOptions$'
-      - '^github\.com/vishvananda/netlink\.\w+$' # Exempt the entire package. Too many big structs.
-      # vmapi.{VirtualMachine,VirtualMachineSpec,VirtualMachineMigration,VirtualMachineMigrationSpec}
-      - '^github\.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1\.VirtualMachine(Migration)?(Spec)?$'
-      - '^github\.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1\.IPPool$'
-      - '^github\.com/neondatabase/autoscaling/pkg/agent/core\.ActionSet$'
-      - '^github\.com/neondatabase/autoscaling/pkg/util/patch\.Operation$'
-      - '^github\.com/neondatabase/autoscaling/pkg/util/watch\.HandlerFuncs$'
-      # certv1.{Certificate,CertificateSpec,CertificateRequest,CertificateRequestSpec}
-      - '^github\.com/cert-manager/cert-manager/pkg/apis/certmanager/v1\.Certificate(Request)?(Spec)?$'
-
-  # see: <https://golangci-lint.run/usage/linters/#gci>
-  gci:
-    custom-order: true
-    skip-generated: true
-    sections:
-      - standard
-      - default
-      # k8s.io can be a large group; we want that visually distinguished
-      - Prefix(k8s.io)
-      - Prefix(github.com/neondatabase/autoscaling)
-
-  # see: <https://golangci-lint.run/usage/linters/#gocritic>, <https://go-critic.com/overview>
-  #
-  # We do not use any experimental checks.
-  gocritic:
-    enabled-tags:
-      - diagnostic
-    disabled-tags:
-      - style
-      - performance
-    # some hand-picked checks from #style
-    enabled-checks:
-      - commentedOutImport
-
-  # see: <https://golangci-lint.run/usage/linters/#nolintlint>
-  nolintlint:
-    allow-unused: false
-    require-explanation: true
-    require-specific: true
+    - asciicheck
+    - bidichk
+    - bodyclose
+    - copyloopvar
+    - dupword
+    - durationcheck
+    - errorlint
+    - exhaustruct
+    - gocritic
+    - nolintlint
+    - predeclared
+    - unparam
+  settings:
+    dupword:
+      # only enable a few common cases here. Typically, duplicated words will be short
+      keywords: ["a", "and", "at", "for", "from", "the"]
+    exhaustruct:
+      exclude:
+        - ^crypto/tls\.Config$
+        - ^net/http\.(Client|Server)
+        - ^net\.(Dialer|TCPAddr)$
+        - ^archive/tar\.Header$
+        - ^k8s\.io/api/core/v1\.\w+$
+        - ^k8s\.io/apimachinery/pkg/api/resource\.Quantity$
+        - ^k8s\.io/apimachinery/pkg/apis/meta/v1\.(Create|Get|List|Watch|Patch|Update|Delete)Options$
+        - ^k8s\.io/apimachinery/pkg/apis/meta/v1\.(Condition|LabelSelector|ObjectMeta)$
+        - ^k8s\.io/client-go/tools/leaderelection/resourcelock\.ResourceLockConfig$
+        - ^k8s\.io/client-go/tools/leaderelection\.(LeaderCallbacks|LeaderElectionConfig)$
+        - ^sigs\.k8s\.io/controller-runtime/pkg/client\.Options$
+        - ^sigs\.k8s\.io/controller-runtime/pkg/controller\.Options$
+        - ^sigs\.k8s\.io/controller-runtime/pkg/controller\.TypedOptions$
+        - ^sigs\.k8s\.io/controller-runtime/pkg/envtest\.(Environment|WebhookInstallOptions)$
+        - ^sigs\.k8s\.io/controller-runtime/pkg/manager\.Options$
+        - ^sigs\.k8s\.io/controller-runtime/pkg/metrics/server\.Options
+        - ^sigs\.k8s\.io/controller-runtime/pkg/reconcile\.Result$
+        - ^sigs\.k8s\.io/controller-runtime/pkg/scheme\.Builder$
+        - ^sigs\.k8s\.io/controller-runtime/pkg/webhook\.Options
+        - ^github\.com/containerd/cgroups/v3/cgroup2\.(CPU|Resources)
+        - ^github\.com/docker/docker/api/types/container\.Config$
+        - ^github\.com/docker/docker/api/types\.\w+Options$
+        - ^github\.com/opencontainers/runtime-spec/specs-go\.\w+$ # Exempt the entire package. Too many big structs.
+        - ^github\.com/prometheus/client_golang/prometheus(/.*)?\.\w+Opts$
+        - ^github\.com/tychoish/fun/pubsub\.BrokerOptions$
+        - ^github\.com/vishvananda/netlink\.\w+$ # Exempt the entire package. Too many big structs.
+        - ^github\.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1\.VirtualMachine(Migration)?(Spec)?$
+        - ^github\.com/neondatabase/autoscaling/neonvm/apis/neonvm/v1\.IPPool$
+        - ^github\.com/neondatabase/autoscaling/pkg/agent/core\.ActionSet$
+        - ^github\.com/neondatabase/autoscaling/pkg/util/patch\.Operation$
+        - ^github\.com/neondatabase/autoscaling/pkg/util/watch\.HandlerFuncs$
+        - ^github\.com/cert-manager/cert-manager/pkg/apis/certmanager/v1\.Certificate(Request)?(Spec)?$
+        - ^github\.com/Azure/azure-sdk-for-go/sdk/.*$ # Exempt all packages in the SDK, objects have a lot of extra fields.
+    gocritic:
+      enabled-checks:
+        - commentedOutImport
+      enabled-tags:
+        - diagnostic
+      disabled-tags:
+        - style
+        - performance
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+      allow-unused: false
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - path: (.+)\.go$ # ChanMutex contains only a channel, which *is* safe to copy
+        text: 'copylocks: .* copies lock value.*: github\.com/neondatabase/autoscaling/pkg/util\.ChanMutex'
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  enable:
+    - gci
+    - gofumpt
+  settings:
+    gci:
+      sections:
+        - standard
+        - default
+        - Prefix(k8s.io)
+        - Prefix(github.com/neondatabase/autoscaling)
+      custom-order: true
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

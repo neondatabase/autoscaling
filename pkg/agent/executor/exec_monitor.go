@@ -9,7 +9,6 @@ import (
 
 	"github.com/neondatabase/autoscaling/pkg/agent/core"
 	"github.com/neondatabase/autoscaling/pkg/api"
-	"github.com/neondatabase/autoscaling/pkg/util"
 )
 
 type MonitorInterface interface {
@@ -27,8 +26,8 @@ type MonitorHandle interface {
 
 func (c *ExecutorCoreWithClients) DoMonitorDownscales(ctx context.Context, logger *zap.Logger) {
 	var (
-		updates     util.BroadcastReceiver = c.updates.NewReceiver()
-		ifaceLogger *zap.Logger            = logger.Named("client")
+		updates     = c.updates.NewReceiver()
+		ifaceLogger = logger.Named("client")
 	)
 
 	// must be called while holding c's lock
@@ -117,8 +116,8 @@ func (c *ExecutorCoreWithClients) DoMonitorDownscales(ctx context.Context, logge
 
 func (c *ExecutorCoreWithClients) DoMonitorUpscales(ctx context.Context, logger *zap.Logger) {
 	var (
-		updates     util.BroadcastReceiver = c.updates.NewReceiver()
-		ifaceLogger *zap.Logger            = logger.Named("client")
+		updates     = c.updates.NewReceiver()
+		ifaceLogger = logger.Named("client")
 	)
 
 	// must be called while holding c's lock

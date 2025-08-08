@@ -317,7 +317,7 @@ func (s *state) nextActions(now time.Time) ActionSet {
 	// ----
 	// Requests to NeonVM:
 	var pluginRequested *api.Resources
-	var pluginRequestedPhase string = "<this string should not appear>"
+	pluginRequestedPhase := "<this string should not appear>"
 	if s.Plugin.OngoingRequest {
 		pluginRequested = &s.Plugin.LastRequest.Resources
 		pluginRequestedPhase = "ongoing"
@@ -688,7 +688,7 @@ func (s *state) calculateMonitorDownscaleAction(
 	// DesiredResourcesFromMetricsOrRequestedUpscaling, so it's we're better off panicking here.
 	if s.timeUntilDeniedDownscaleExpired(now) > 0 && !s.Monitor.DeniedDownscale.Requested.HasFieldLessThan(requestResources) {
 		panic(errors.New(
-			"Wanted to send vm-monitor downscale request, but too soon after previously denied downscaling that should have been handled earlier",
+			"wanted to send vm-monitor downscale request, but too soon after previously denied downscaling that should have been handled earlier",
 		))
 	}
 
@@ -1110,20 +1110,20 @@ func (h PluginHandle) RequestSuccessful(
 	}()
 
 	if err := resp.Permit.ValidateNonZero(); err != nil {
-		return fmt.Errorf("Invalid permit: %w", err)
+		return fmt.Errorf("invalid permit: %w", err)
 	}
 
 	// Errors from resp in connection with the prior request
 	if resp.Permit.HasFieldGreaterThan(h.s.Plugin.LastRequest.Resources) {
 		return fmt.Errorf(
-			"Permit has resources greater than request (%+v vs. %+v)",
+			"permit has resources greater than request (%+v vs. %+v)",
 			resp.Permit, h.s.Plugin.LastRequest.Resources,
 		)
 	}
 
 	// Errors from resp in connection with the prior request AND the VM state
 	if vmUsing := h.s.VM.Using(); resp.Permit.HasFieldLessThan(vmUsing) {
-		return fmt.Errorf("Permit has resources less than VM (%+v vs %+v)", resp.Permit, vmUsing)
+		return fmt.Errorf("permit has resources less than VM (%+v vs %+v)", resp.Permit, vmUsing)
 	}
 
 	// All good - set everything.

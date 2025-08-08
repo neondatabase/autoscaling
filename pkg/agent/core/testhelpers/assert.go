@@ -104,7 +104,7 @@ func (f PreparedFunctionCall) Equals(expected ...any) {
 	numOut := fTy.NumOut()
 	if len(expected) != numOut {
 		panic(fmt.Errorf(
-			"Mismatched number of out parameters from function: func has %d but expected len is %d",
+			"mismatched number of out parameters from function: func has %d but expected len is %d",
 			numOut,
 			len(expected),
 		))

@@ -173,7 +173,7 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 	initialList, err := client.List(ctx, listOpts)
 	config.Metrics.doneList(err)
 	if err != nil {
-		return nil, fmt.Errorf("Initial list failed: %w", err)
+		return nil, fmt.Errorf("initial list failed: %w", err)
 	}
 
 	// set ResourceVersion so that the client.Watch request(s) show only the changes since we made
@@ -228,7 +228,7 @@ func Watch[C Client[L], L metav1.ListMetaAccessor, T any, P Object[T]](
 	watcher, err := client.Watch(ctx, watchOpts)
 	config.Metrics.doneWatch(err)
 	if err != nil {
-		return nil, fmt.Errorf("Initial watch failed: %w", err)
+		return nil, fmt.Errorf("initial watch failed: %w", err)
 	}
 
 	// Lock the store to pass it into the goroutine, so that we don't have to worry about immediate
@@ -794,8 +794,8 @@ type IndexedStore[T any, I Index[T]] struct {
 //
 // It is almost guaranteed to be an error to indirectly return the index with this function.
 func (w IndexedStore[T, I]) WithIndex(f func(I)) {
-	w.Store.mutex.Lock()
-	defer w.Store.mutex.Unlock()
+	w.mutex.Lock()
+	defer w.mutex.Unlock()
 
 	f(w.index)
 }

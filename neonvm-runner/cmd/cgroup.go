@@ -37,7 +37,7 @@ const (
 func setupQEMUCgroup(logger *zap.Logger, selfPodName string, initialCPU vmv1.MilliCPU) (string, error) {
 	selfCgroupPath, err := getSelfCgroupPath(logger)
 	if err != nil {
-		return "", fmt.Errorf("Failed to get self cgroup path: %w", err)
+		return "", fmt.Errorf("failed to get self cgroup path: %w", err)
 	}
 	// Sometimes we'll get just '/' as our cgroup path. If that's the case, we should reset it so
 	// that the cgroup '/neonvm-qemu-...' still works.
@@ -54,7 +54,7 @@ func setupQEMUCgroup(logger *zap.Logger, selfPodName string, initialCPU vmv1.Mil
 	logger.Info("Determined QEMU cgroup path", zap.String("path", cgroupPath))
 
 	if err := setCgroupLimit(logger, initialCPU, cgroupPath); err != nil {
-		return "", fmt.Errorf("Failed to set cgroup limit: %w", err)
+		return "", fmt.Errorf("failed to set cgroup limit: %w", err)
 	}
 
 	return cgroupPath, nil

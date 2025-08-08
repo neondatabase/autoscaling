@@ -42,21 +42,21 @@ func (r MainRunner) Run(logger *zap.Logger, ctx context.Context) error {
 	logger.Info("Starting VM watcher")
 	vmWatchStore, err := startVMWatcher(ctx, logger, r.Config, r.VMClient, watchMetrics, perVMMetrics, r.EnvArgs.K8sNodeName, pushToQueue)
 	if err != nil {
-		return fmt.Errorf("Error starting VM watcher: %w", err)
+		return fmt.Errorf("error starting VM watcher: %w", err)
 	}
 	defer vmWatchStore.Stop()
 	logger.Info("VM watcher started")
 
 	schedTracker, err := schedwatch.StartSchedulerWatcher(ctx, logger, r.KubeClient, watchMetrics, r.Config.Scheduler.SchedulerName)
 	if err != nil {
-		return fmt.Errorf("Starting scheduler watch server: %w", err)
+		return fmt.Errorf("starting scheduler watch server: %w", err)
 	}
 	defer schedTracker.Stop()
 
 	scalingEventsMetrics := scalingevents.NewPromMetrics(globalPromReg)
 	scalingReporter, err := scalingevents.NewReporter(ctx, logger, &r.Config.ScalingEvents, scalingEventsMetrics)
 	if err != nil {
-		return fmt.Errorf("Error creating scaling events reporter: %w", err)
+		return fmt.Errorf("error creating scaling events reporter: %w", err)
 	}
 
 	globalState := r.newAgentState(
@@ -75,16 +75,16 @@ func (r MainRunner) Run(logger *zap.Logger, ctx context.Context) error {
 
 	promLogger := logger.Named("prometheus")
 	if err := util.StartPrometheusMetricsServer(ctx, promLogger.Named("global"), 9100, globalPromReg); err != nil {
-		return fmt.Errorf("Error starting prometheus metrics server: %w", err)
+		return fmt.Errorf("error starting prometheus metrics server: %w", err)
 	}
 	if err := util.StartPrometheusMetricsServer(ctx, promLogger.Named("per-vm"), 9101, vmPromReg); err != nil {
-		return fmt.Errorf("Error starting prometheus metrics server: %w", err)
+		return fmt.Errorf("error starting prometheus metrics server: %w", err)
 	}
 
 	if r.Config.DumpState != nil {
 		logger.Info("Starting 'dump state' server")
 		if err := globalState.StartDumpStateServer(ctx, logger.Named("dump-state"), r.Config.DumpState); err != nil {
-			return fmt.Errorf("Error starting dump state server: %w", err)
+			return fmt.Errorf("error starting dump state server: %w", err)
 		}
 	}
 

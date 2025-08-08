@@ -29,7 +29,7 @@ func (s *agentState) StartDumpStateServer(shutdownCtx context.Context, logger *z
 	addr := net.TCPAddr{IP: net.IPv4zero, Port: int(config.Port)}
 	listener, err := net.ListenTCP("tcp", &addr)
 	if err != nil {
-		return fmt.Errorf("Error binding to %v", addr)
+		return fmt.Errorf("error binding to %v", addr)
 	}
 
 	go func() {
