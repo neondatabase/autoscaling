@@ -51,7 +51,6 @@ func NewAzureBlobStorageClient(
 	cfg AzureBlobStorageClientConfig,
 	generateKey func() string,
 ) (*AzureClient, error) {
-	//nolint:exhaustruct // It's part of Azure SDK
 	clientOptions := &azblob.ClientOptions{
 		ClientOptions: azcore.ClientOptions{
 			Telemetry: policy.TelemetryOptions{ApplicationID: "neon-autoscaler"},

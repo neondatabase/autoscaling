@@ -245,7 +245,7 @@ func debugServerFunc(reconcilers ...controllers.ReconcilerWithMetrics) manager.R
 
 			if r.Method != http.MethodGet {
 				w.WriteHeader(http.StatusMethodNotAllowed)
-				_, _ = w.Write([]byte(fmt.Sprintf("request method must be %s", http.MethodGet)))
+				fmt.Fprintf(w, "request method must be %s", http.MethodGet)
 				return
 			}
 
@@ -257,7 +257,7 @@ func debugServerFunc(reconcilers ...controllers.ReconcilerWithMetrics) manager.R
 			responseBody, err := json.Marshal(&response)
 			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
-				_, _ = w.Write([]byte(fmt.Sprintf("failed to marshal JSON response: %s", err)))
+				fmt.Fprintf(w, "failed to marshal JSON response: %s", err)
 				return
 			}
 

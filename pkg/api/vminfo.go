@@ -233,11 +233,11 @@ func extractVmInfoGeneric(
 	if boundsJSON, ok := obj.GetObjectMeta().GetAnnotations()[AnnotationAutoscalingBounds]; ok {
 		var bounds ScalingBounds
 		if err := json.Unmarshal([]byte(boundsJSON), &bounds); err != nil {
-			return nil, fmt.Errorf("Error unmarshaling annotation %q: %w", AnnotationAutoscalingBounds, err)
+			return nil, fmt.Errorf("error unmarshaling annotation %q: %w", AnnotationAutoscalingBounds, err)
 		}
 
 		if err := bounds.Validate(&resources.MemorySlotSize); err != nil {
-			return nil, fmt.Errorf("Bad scaling bounds in annotation %q: %w", AnnotationAutoscalingBounds, err)
+			return nil, fmt.Errorf("bad scaling bounds in annotation %q: %w", AnnotationAutoscalingBounds, err)
 		}
 		info.applyBounds(bounds)
 	}
@@ -245,11 +245,11 @@ func extractVmInfoGeneric(
 	if configJSON, ok := obj.GetObjectMeta().GetAnnotations()[AnnotationAutoscalingConfig]; ok {
 		var config ScalingConfig
 		if err := json.Unmarshal([]byte(configJSON), &config); err != nil {
-			return nil, fmt.Errorf("Error unmarshaling annotation %q: %w", AnnotationAutoscalingConfig, err)
+			return nil, fmt.Errorf("error unmarshaling annotation %q: %w", AnnotationAutoscalingConfig, err)
 		}
 
 		if err := config.ValidateOverrides(); err != nil {
-			return nil, fmt.Errorf("Bad scaling config in annotation %q: %w", AnnotationAutoscalingConfig, err)
+			return nil, fmt.Errorf("bad scaling config in annotation %q: %w", AnnotationAutoscalingConfig, err)
 		}
 		info.Config.ScalingConfig = &config
 	}

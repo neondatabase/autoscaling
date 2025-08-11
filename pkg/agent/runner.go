@@ -697,7 +697,7 @@ func doMetricsRequest(
 
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, url, bytes.NewReader(nil))
 	if err != nil {
-		panic(fmt.Errorf("Error constructing metrics request to %q: %w", url, err))
+		panic(fmt.Errorf("error constructing metrics request to %q: %w", url, err))
 	}
 
 	logger.Debug("Making metrics request to VM", zap.String("url", url))
@@ -706,16 +706,16 @@ func doMetricsRequest(
 	if ctx.Err() != nil {
 		return ctx.Err()
 	} else if err != nil {
-		return fmt.Errorf("Error making request to %q: %w", url, err)
+		return fmt.Errorf("error making request to %q: %w", url, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		return fmt.Errorf("Unsuccessful response status %d", resp.StatusCode)
+		return fmt.Errorf("unsuccessful response status %d", resp.StatusCode)
 	}
 
 	if err := core.ParseMetrics(resp.Body, metrics); err != nil {
-		return fmt.Errorf("Error parsing metrics from prometheus output: %w", err)
+		return fmt.Errorf("error parsing metrics from prometheus output: %w", err)
 	}
 
 	return nil
@@ -742,7 +742,7 @@ func (r *Runner) doNeonVMRequest(
 
 	patchPayload, err := json.Marshal(patches)
 	if err != nil {
-		panic(fmt.Errorf("Error marshalling JSON patch: %w", err))
+		panic(fmt.Errorf("error marshalling JSON patch: %w", err))
 	}
 
 	timeout := time.Second * time.Duration(r.global.config.NeonVM.RequestTimeoutSeconds)
@@ -870,7 +870,7 @@ func (r *Runner) DoSchedulerRequest(
 
 	reqBody, err := json.Marshal(reqData)
 	if err != nil {
-		return nil, fmt.Errorf("Error encoding request JSON: %w", err)
+		return nil, fmt.Errorf("error encoding request JSON: %w", err)
 	}
 
 	timeout := time.Second * time.Duration(r.global.config.NeonVM.RequestTimeoutSeconds)
@@ -881,7 +881,7 @@ func (r *Runner) DoSchedulerRequest(
 
 	request, err := http.NewRequestWithContext(reqCtx, http.MethodPost, url, bytes.NewReader(reqBody))
 	if err != nil {
-		return nil, fmt.Errorf("Error building request to %q: %w", url, err)
+		return nil, fmt.Errorf("error building request to %q: %w", url, err)
 	}
 	request.Header.Set("content-type", "application/json")
 
@@ -891,7 +891,7 @@ func (r *Runner) DoSchedulerRequest(
 	if err != nil {
 		description := fmt.Sprintf("[error doing request: %s]", util.RootError(err))
 		r.global.metrics.schedulerRequests.WithLabelValues(description).Inc()
-		return nil, fmt.Errorf("Error doing request: %w", err)
+		return nil, fmt.Errorf("error doing request: %w", err)
 	}
 	defer response.Body.Close()
 
@@ -899,19 +899,19 @@ func (r *Runner) DoSchedulerRequest(
 
 	respBody, err := io.ReadAll(response.Body)
 	if err != nil {
-		return nil, fmt.Errorf("Error reading body for response: %w", err)
+		return nil, fmt.Errorf("error reading body for response: %w", err)
 	}
 
 	if response.StatusCode != 200 {
 		// Fatal because 4XX implies our state doesn't match theirs, 5XX means we can't assume
 		// current contents of the state, and anything other than 200, 4XX, or 5XX shouldn't happen
-		return nil, fmt.Errorf("Received response status %d body %q", response.StatusCode, string(respBody))
+		return nil, fmt.Errorf("received response status %d body %q", response.StatusCode, string(respBody))
 	}
 
 	var respData api.PluginResponse
 	if err := json.Unmarshal(respBody, &respData); err != nil {
 		// Fatal because invalid JSON might also be semantically invalid
-		return nil, fmt.Errorf("Bad JSON response: %w", err)
+		return nil, fmt.Errorf("bad JSON response: %w", err)
 	}
 	level := zap.DebugLevel
 	if respData.Permit.HasFieldLessThan(resources) {
