@@ -169,7 +169,7 @@ const DefaultConfigPath = "/etc/scheduler-plugin-config/autoscale-enforcer-confi
 func ReadConfig(path string) (*Config, error) {
 	file, err := os.Open(path)
 	if err != nil {
-		return nil, fmt.Errorf("Error opening config file %q: %w", path, err)
+		return nil, fmt.Errorf("error opening config file %q: %w", path, err)
 	}
 
 	defer file.Close()
@@ -177,11 +177,11 @@ func ReadConfig(path string) (*Config, error) {
 	jsonDecoder := json.NewDecoder(file)
 	jsonDecoder.DisallowUnknownFields()
 	if err = jsonDecoder.Decode(&config); err != nil {
-		return nil, fmt.Errorf("Error decoding JSON config in %q: %w", path, err)
+		return nil, fmt.Errorf("error decoding JSON config in %q: %w", path, err)
 	}
 
 	if path, err = config.validate(); err != nil {
-		return nil, fmt.Errorf("Invalid config at %s: %w", path, err)
+		return nil, fmt.Errorf("invalid config at %s: %w", path, err)
 	}
 
 	return &config, nil

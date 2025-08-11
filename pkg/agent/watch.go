@@ -161,7 +161,7 @@ func startVMWatcher(
 func makeVMEvent(logger *zap.Logger, vm *vmv1.VirtualMachine, kind vmEventKind) (vmEvent, error) {
 	info, err := api.ExtractVmInfo(logger, vm)
 	if err != nil {
-		return vmEvent{}, fmt.Errorf("Error extracting VM info: %w", err)
+		return vmEvent{}, fmt.Errorf("error extracting VM info: %w", err)
 	}
 
 	endpointID := ""

@@ -266,7 +266,7 @@ func (h *vmMetricsHistory) finalizeCurrentTimeSlice() {
 //
 // Merging may fail if s.endTime != next.startTime or s.metrics != next.metrics.
 func (s *metricsTimeSlice) tryMerge(next metricsTimeSlice) bool {
-	merged := s.endTime == next.startTime && s.metrics == next.metrics
+	merged := s.endTime.Equal(next.startTime) && s.metrics == next.metrics
 	if merged {
 		s.endTime = next.endTime
 	}

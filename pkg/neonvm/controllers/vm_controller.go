@@ -123,7 +123,7 @@ func (r *VMReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 	}
 
 	// examine DeletionTimestamp to determine if object is under deletion
-	if vm.ObjectMeta.DeletionTimestamp.IsZero() {
+	if vm.DeletionTimestamp.IsZero() {
 		// The object is not being deleted, so if it does not have our finalizer,
 		// then lets add the finalizer and update the object. This is equivalent
 		// registering our finalizer.
@@ -151,7 +151,7 @@ func (r *VMReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 			if !changed {
 				// We already checked ContainsFinalizer to go down this code path, so if
 				// RemoveFinalizer doesn't change anything, something has gone quite wrong!
-				err := errors.New("Removing finalizer didn't change VirtualMachine object")
+				err := errors.New("removing finalizer didn't change VirtualMachine object")
 				return ctrl.Result{}, err
 			}
 			if err := r.tryUpdateVM(ctx, &vm); err != nil {
@@ -358,13 +358,13 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 		if len(vm.Status.PodName) == 0 {
 			vm.Status.PodName = names.SimpleNameGenerator.GenerateName(fmt.Sprintf("%s-", vm.Name))
 			if err := vm.Spec.Guest.ValidateMemorySize(); err != nil {
-				return fmt.Errorf("Failed to validate memory size for VM: %w", err)
+				return fmt.Errorf("failed to validate memory size for VM: %w", err)
 			}
 
 			// Update the .Status on API Server to avoid creating multiple pods for a single VM
 			// See https://github.com/neondatabase/autoscaling/issues/794 for the context
 			if err := r.Status().Update(ctx, vm); err != nil {
-				return fmt.Errorf("Failed to update VirtualMachine status: %w", err)
+				return fmt.Errorf("failed to update VirtualMachine status: %w", err)
 			}
 		}
 
@@ -415,7 +415,7 @@ func (r *VMReconciler) doReconcile(ctx context.Context, vm *vmv1.VirtualMachine)
 			log.Info("Runner Pod was created", "Pod.Namespace", pod.Namespace, "Pod.Name", pod.Name)
 
 			if !vm.HasRestarted() {
-				d := pod.CreationTimestamp.Time.Sub(vm.CreationTimestamp.Time)
+				d := pod.CreationTimestamp.Sub(vm.CreationTimestamp.Time)
 				r.Metrics.vmCreationToRunnerCreationTime.Observe(d.Seconds())
 				log.Info("VM creation to runner pod creation time", "duration_sec", d.Seconds())
 			}
@@ -1632,7 +1632,7 @@ func podSpec(
 		} else { // get network from env variables
 			nadNetwork = fmt.Sprintf("%s/%s", config.NADConfig.RunnerNamespace, config.NADConfig.RunnerName)
 		}
-		pod.ObjectMeta.Annotations[nadapiv1.NetworkAttachmentAnnot] = fmt.Sprintf("%s@%s", nadNetwork, vm.Spec.ExtraNetwork.Interface)
+		pod.Annotations[nadapiv1.NetworkAttachmentAnnot] = fmt.Sprintf("%s@%s", nadNetwork, vm.Spec.ExtraNetwork.Interface)
 	}
 
 	return pod, nil

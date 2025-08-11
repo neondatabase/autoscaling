@@ -42,7 +42,7 @@ const (
 	DatastoreRetriesDelay = 100 * time.Millisecond
 )
 
-var ErrAgain = errors.New("IPAM concurrency limit reached. Try again later.")
+var ErrAgain = errors.New("IPAM concurrency limit reached, try again later")
 
 type Temporary interface {
 	Temporary() bool
@@ -357,7 +357,7 @@ func (i *IPAM) getNeonvmIPPool(ctx context.Context, ipRange string) (*NeonvmIPPo
 	}
 
 	return &NeonvmIPPool{
-		vmClient: i.Client.VMClient,
+		vmClient: i.VMClient,
 		pool:     pool,
 		firstip:  ip,
 	}, nil
