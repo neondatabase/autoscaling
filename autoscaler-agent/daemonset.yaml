@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: autoscaler-agent
-  namespace: kube-system
+  namespace: neonvm-system
 spec:
   selector:
     matchLabels:
