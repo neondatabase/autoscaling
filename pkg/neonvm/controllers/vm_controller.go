@@ -1288,7 +1288,11 @@ func podSpec(
 					VolumeMounts: []corev1.VolumeMount{{
 						Name:      "virtualmachineimages",
 						MountPath: "/vm/images",
-					}},
+					},
+						{
+							Name:      "devnettun",
+							MountPath: "/dev/net/tun",
+						}},
 					Command: []string{
 						"sh", "-c",
 						"mv /disk.qcow2 /vm/images/rootdisk.qcow2 && " +
@@ -1310,7 +1314,7 @@ func podSpec(
 					// Ensure restrictive context for the container
 					// More info: https://kubernetes.io/docs/concepts/security/pod-security-standards/#restricted
 					SecurityContext: &corev1.SecurityContext{
-						Privileged: lo.ToPtr(false),
+						Privileged: lo.ToPtr(true),
 						Capabilities: &corev1.Capabilities{
 							Add: []corev1.Capability{
 								"NET_ADMIN",
@@ -1388,13 +1392,17 @@ func podSpec(
 							// Note that this mode corresponds to "private" in Linux terminology.
 							MountPropagation: lo.ToPtr(corev1.MountPropagationNone),
 						}
+						devNetTun := corev1.VolumeMount{
+							Name:      "devnettun",
+							MountPath: "/dev/net/tun",
+						}
 
 						if config.DisableRunnerCgroup {
-							return []corev1.VolumeMount{images}
+							return []corev1.VolumeMount{images, devNetTun}
 						} else {
 							// the /sys/fs/cgroup mount is only necessary if neonvm-runner has to
 							// do is own cpu limiting
-							return []corev1.VolumeMount{images, cgroups}
+							return []corev1.VolumeMount{images, cgroups, devNetTun}
 						}
 					}(),
 					Resources: vm.Spec.PodResources,
@@ -1430,10 +1438,19 @@ func podSpec(
 						},
 					},
 				}
+				devNetTun := corev1.Volume{
+					Name: "devnettun",
+					VolumeSource: corev1.VolumeSource{
+						HostPath: &corev1.HostPathVolumeSource{
+							Path: "/dev/net/tun",
+							Type: lo.ToPtr(corev1.HostPathCharDev),
+						},
+					},
+				}
 				if config.DisableRunnerCgroup {
-					return []corev1.Volume{images}
+					return []corev1.Volume{images, devNetTun}
 				} else {
-					return []corev1.Volume{images, cgroup}
+					return []corev1.Volume{images, cgroup, devNetTun}
 				}
 			}(),
 		},
@@ -1500,7 +1517,8 @@ func podSpec(
 			VolumeMounts: []corev1.VolumeMount{{
 				Name:      "virtualmachineimages",
 				MountPath: "/vm/images",
-			}},
+			},
+			},
 			SecurityContext: &corev1.SecurityContext{
 				// uid=36(qemu) gid=34(kvm) groups=34(kvm)
 				RunAsUser:  lo.ToPtr[int64](36),
