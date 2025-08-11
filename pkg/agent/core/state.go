@@ -97,6 +97,8 @@ type Config struct {
 
 	// ObservabilityCallbacks are the callbacks to submit datapoints for observability.
 	ObservabilityCallbacks ObservabilityCallbacks `json:"-"`
+
+	DesiredResourcesHook func() api.Resources `json:"-"`
 }
 
 type LogConfig struct {
@@ -248,10 +250,18 @@ func NewState(vm api.VmInfo, config Config) *State {
 			Debug:  false,
 			VM:     vm,
 			Plugin: pluginState{
-				OngoingRequest:  false,
-				LastRequest:     nil,
-				LastFailureAt:   nil,
-				Permit:          nil,
+				OngoingRequest: false,
+				LastRequest: &pluginRequested{
+					Resources: api.Resources{
+						VCPU: 500,
+						Mem:  api.Bytes(1 << 30 /* 1 Gi */),
+					},
+				},
+				LastFailureAt: nil,
+				Permit: &api.Resources{
+					VCPU: 500,
+					Mem:  api.Bytes(1 << 30 /* 1 Gi */),
+				},
 				CurrentRevision: vmv1.ZeroRevision,
 			},
 			Monitor: monitorState{
@@ -734,136 +744,143 @@ func (s *state) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 	// 1. Take the maximum of these two goal CUs to create a unified goal CU
 	// 2. Cap the goal CU by min/max, etc
 	// 3. that's it!
+	var result api.Resources
+	if s.Config.DesiredResourcesHook != nil {
+		result = s.Config.DesiredResourcesHook()
+	} else {
+		reportGoals := func(goalCU uint32, parts ScalingGoalParts) {
+			currentCU, ok := s.VM.Using().DivResources(s.Config.ComputeUnit)
+			if !ok {
+				return // skip reporting if the current CU is not right.
+			}
 
-	reportGoals := func(goalCU uint32, parts ScalingGoalParts) {
-		currentCU, ok := s.VM.Using().DivResources(s.Config.ComputeUnit)
-		if !ok {
-			return // skip reporting if the current CU is not right.
+			if report := s.Config.ObservabilityCallbacks.HypotheticalScaling; report != nil {
+				report(now, uint32(currentCU), goalCU, parts)
+			}
 		}
 
-		if report := s.Config.ObservabilityCallbacks.HypotheticalScaling; report != nil {
-			report(now, uint32(currentCU), goalCU, parts)
+		sg, goalCULogFields := calculateGoalCU(
+			s.warn,
+			s.scalingConfig(),
+			s.Config.ComputeUnit,
+			s.Metrics,
+			s.LFCMetrics,
+		)
+		_ = goalCULogFields
+		goalCU := sg.GoalCU()
+		// If we don't have all the metrics we need, we'll later prevent downscaling to avoid flushing
+		// the VM's cache on autoscaler-agent restart if we have SystemMetrics but not LFCMetrics.
+		hasAllMetrics := sg.HasAllMetrics
+
+		if hasAllMetrics {
+			reportGoals(goalCU, sg.Parts)
 		}
-	}
 
-	sg, goalCULogFields := calculateGoalCU(
-		s.warn,
-		s.scalingConfig(),
-		s.Config.ComputeUnit,
-		s.Metrics,
-		s.LFCMetrics,
-	)
-	goalCU := sg.GoalCU()
-	// If we don't have all the metrics we need, we'll later prevent downscaling to avoid flushing
-	// the VM's cache on autoscaler-agent restart if we have SystemMetrics but not LFCMetrics.
-	hasAllMetrics := sg.HasAllMetrics
+		// Copy the initial value of the goal CU so that we can accurately track whether either
+		// requested upscaling or denied downscaling affected the outcome.
+		// Otherwise as written, it'd be possible to update goalCU from requested upscaling and
+		// incorrectly miss that denied downscaling could have had the same effect.
+		initialGoalCU := goalCU
 
-	if hasAllMetrics {
-		reportGoals(goalCU, sg.Parts)
-	}
+		var requestedUpscalingAffectedResult bool
+		_ = requestedUpscalingAffectedResult
 
-	// Copy the initial value of the goal CU so that we can accurately track whether either
-	// requested upscaling or denied downscaling affected the outcome.
-	// Otherwise as written, it'd be possible to update goalCU from requested upscaling and
-	// incorrectly miss that denied downscaling could have had the same effect.
-	initialGoalCU := goalCU
-
-	var requestedUpscalingAffectedResult bool
-
-	// Update goalCU based on any explicitly requested upscaling
-	timeUntilRequestedUpscalingExpired := s.timeUntilRequestedUpscalingExpired(now)
-	requestedUpscalingInEffect := timeUntilRequestedUpscalingExpired > 0
-	if requestedUpscalingInEffect {
-		reqCU := s.requiredCUForRequestedUpscaling(s.Config.ComputeUnit, *s.Monitor.RequestedUpscale)
-		if reqCU > initialGoalCU {
-			// FIXME: this isn't quite correct, because if initialGoalCU is already equal to the
-			// maximum goal CU we *could* have, this won't actually have an effect.
-			requestedUpscalingAffectedResult = true
-			goalCU = max(goalCU, reqCU)
+		// Update goalCU based on any explicitly requested upscaling
+		timeUntilRequestedUpscalingExpired := s.timeUntilRequestedUpscalingExpired(now)
+		requestedUpscalingInEffect := timeUntilRequestedUpscalingExpired > 0
+		if requestedUpscalingInEffect {
+			reqCU := s.requiredCUForRequestedUpscaling(s.Config.ComputeUnit, *s.Monitor.RequestedUpscale)
+			if reqCU > initialGoalCU {
+				// FIXME: this isn't quite correct, because if initialGoalCU is already equal to the
+				// maximum goal CU we *could* have, this won't actually have an effect.
+				requestedUpscalingAffectedResult = true
+				goalCU = max(goalCU, reqCU)
+			}
 		}
-	}
 
-	var deniedDownscaleAffectedResult bool
+		var deniedDownscaleAffectedResult bool
 
-	// Update goalCU based on any previously denied downscaling
-	timeUntilDeniedDownscaleExpired := s.timeUntilDeniedDownscaleExpired(now)
-	deniedDownscaleInEffect := timeUntilDeniedDownscaleExpired > 0
-	if deniedDownscaleInEffect {
-		reqCU := s.requiredCUForDeniedDownscale(s.Config.ComputeUnit, s.Monitor.DeniedDownscale.Requested)
-		if reqCU > initialGoalCU {
-			deniedDownscaleAffectedResult = true
-			goalCU = max(goalCU, reqCU)
+		// Update goalCU based on any previously denied downscaling
+		timeUntilDeniedDownscaleExpired := s.timeUntilDeniedDownscaleExpired(now)
+		deniedDownscaleInEffect := timeUntilDeniedDownscaleExpired > 0
+		if deniedDownscaleInEffect {
+			reqCU := s.requiredCUForDeniedDownscale(s.Config.ComputeUnit, s.Monitor.DeniedDownscale.Requested)
+			if reqCU > initialGoalCU {
+				deniedDownscaleAffectedResult = true
+				goalCU = max(goalCU, reqCU)
+			}
 		}
-	}
 
-	// resources for the desired "goal" compute units
-	goalResources := s.Config.ComputeUnit.Mul(uint16(goalCU))
+		// resources for the desired "goal" compute units
+		goalResources := s.Config.ComputeUnit.Mul(uint16(goalCU))
 
-	// If we don't have all the metrics we need to make a proper decision, make sure that we aren't
-	// going to scale down below the current resources.
-	// Otherwise, we can make an under-informed decision that has undesirable impacts (e.g., scaling
-	// down because we don't have LFC metrics and flushing the cache because of it).
-	if !hasAllMetrics {
-		goalResources = goalResources.Max(s.VM.Using())
-	}
-
-	// bound goalResources by the minimum and maximum resource amounts for the VM
-	result := goalResources.Min(s.VM.Max()).Max(s.VM.Min())
-
-	// ... but if we aren't allowed to downscale, then we *must* make sure that the VM's usage value
-	// won't decrease to the previously denied amount, even if it's greater than the maximum.
-	//
-	// We can run into siutations like this when VM scale-down on bounds change fails, so we end up
-	// with a usage value greater than the maximum.
-	//
-	// It's not a great situation to be in, but it's easier to make the policy "give the users a
-	// little extra if we mess up" than "oops we OOM-killed your DB, hope you weren't doing anything".
-	if deniedDownscaleInEffect {
-		// roughly equivalent to "result >= s.monitor.deniedDownscale.requested"
-		if !result.HasFieldGreaterThan(s.Monitor.DeniedDownscale.Requested) {
-			// This can only happen if s.vm.Max() is less than goalResources, because otherwise this
-			// would have been factored into goalCU, affecting goalResources. Hence, the warning.
-			s.warn("Can't decrease desired resources to within VM maximum because of vm-monitor previously denied downscale request")
+		// If we don't have all the metrics we need to make a proper decision, make sure that we aren't
+		// going to scale down below the current resources.
+		// Otherwise, we can make an under-informed decision that has undesirable impacts (e.g., scaling
+		// down because we don't have LFC metrics and flushing the cache because of it).
+		if !hasAllMetrics {
+			goalResources = goalResources.Max(s.VM.Using())
 		}
-		preMaxResult := result
-		result = result.Max(s.minRequiredResourcesForDeniedDownscale(s.Config.ComputeUnit, *s.Monitor.DeniedDownscale))
-		if result != preMaxResult {
-			deniedDownscaleAffectedResult = true
-		}
-	}
 
-	// Check that the result is sound.
-	//
-	// With the current (naive) implementation, this is trivially ok. In future versions, it might
-	// not be so simple, so it's good to have this integrity check here.
-	if !deniedDownscaleAffectedResult && result.HasFieldGreaterThan(s.VM.Max()) {
-		panic(fmt.Errorf(
-			"produced invalid desired state: result has field greater than max. this = %+v", *s,
-		))
-	} else if result.HasFieldLessThan(s.VM.Min()) {
-		panic(fmt.Errorf(
-			"produced invalid desired state: result has field less than min. this = %+v", *s,
-		))
+		// bound goalResources by the minimum and maximum resource amounts for the VM
+		result = goalResources.Min(s.VM.Max()).Max(s.VM.Min())
+
+		// ... but if we aren't allowed to downscale, then we *must* make sure that the VM's usage value
+		// won't decrease to the previously denied amount, even if it's greater than the maximum.
+		//
+		// We can run into siutations like this when VM scale-down on bounds change fails, so we end up
+		// with a usage value greater than the maximum.
+		//
+		// It's not a great situation to be in, but it's easier to make the policy "give the users a
+		// little extra if we mess up" than "oops we OOM-killed your DB, hope you weren't doing anything".
+		if deniedDownscaleInEffect {
+			// roughly equivalent to "result >= s.monitor.deniedDownscale.requested"
+			if !result.HasFieldGreaterThan(s.Monitor.DeniedDownscale.Requested) {
+				// This can only happen if s.vm.Max() is less than goalResources, because otherwise this
+				// would have been factored into goalCU, affecting goalResources. Hence, the warning.
+				s.warn("Can't decrease desired resources to within VM maximum because of vm-monitor previously denied downscale request")
+			}
+			preMaxResult := result
+			result = result.Max(s.minRequiredResourcesForDeniedDownscale(s.Config.ComputeUnit, *s.Monitor.DeniedDownscale))
+			if result != preMaxResult {
+				deniedDownscaleAffectedResult = true
+			}
+		}
+
+		// Check that the result is sound.
+		//
+		// With the current (naive) implementation, this is trivially ok. In future versions, it might
+		// not be so simple, so it's good to have this integrity check here.
+		if !deniedDownscaleAffectedResult && result.HasFieldGreaterThan(s.VM.Max()) {
+			panic(fmt.Errorf(
+				"produced invalid desired state: result has field greater than max. this = %+v", *s,
+			))
+		} else if result.HasFieldLessThan(s.VM.Min()) {
+			panic(fmt.Errorf(
+				"produced invalid desired state: result has field less than min. this = %+v", *s,
+			))
+		}
 	}
 
 	calculateWaitTime := func(actions ActionSet) *time.Duration {
-		var waiting bool
-		waitTime := time.Duration(int64(1<<63 - 1)) // time.Duration is an int64. As an "unset" value, use the maximum.
+		// var waiting bool
+		// waitTime := time.Duration(int64(1<<63 - 1)) // time.Duration is an int64. As an "unset" value, use the maximum.
 
-		if deniedDownscaleAffectedResult && actions.MonitorDownscale == nil && s.Monitor.OngoingRequest == nil {
-			waitTime = min(waitTime, timeUntilDeniedDownscaleExpired)
-			waiting = true
-		}
-		if requestedUpscalingAffectedResult {
-			waitTime = min(waitTime, timeUntilRequestedUpscalingExpired)
-			waiting = true
-		}
+		// if deniedDownscaleAffectedResult && actions.MonitorDownscale == nil && s.Monitor.OngoingRequest == nil {
+		// 	waitTime = min(waitTime, timeUntilDeniedDownscaleExpired)
+		// 	waiting = true
+		// }
+		// if requestedUpscalingAffectedResult {
+		// 	waitTime = min(waitTime, timeUntilRequestedUpscalingExpired)
+		// 	waiting = true
+		// }
 
-		if waiting {
-			return &waitTime
-		} else {
-			return nil
-		}
+		// if waiting {
+		// 	return &waitTime
+		// } else {
+		// 	return nil
+		// }
+		return nil
 	}
 	s.updateTargetRevision(now, result, s.VM.Using())
 
@@ -876,7 +893,7 @@ func (s *state) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (
 		zap.Object("target", result),
 		zap.Object("targetRevision", &s.TargetRevision),
 	}
-	logFields = append(logFields, goalCULogFields...)
+	// logFields = append(logFields, goalCULogFields...)
 	s.info("Calculated desired resources", logFields...)
 
 	return result, calculateWaitTime
