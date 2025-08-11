@@ -99,13 +99,13 @@ func NewAutoscaleEnforcerPlugin(
 	// It's not guaranteed, because parallel workers acquiring the same lock ends up with *some*
 	// reordered handling, but it helps dramatically reduce the number of warnings in practice.
 	nodeHandlers := watchHandlers[*corev1.Node](reconcileQueue, initEvents)
-	nodeStore, err := watchNodeEvents(ctx, logger, handle.ClientSet(), watchMetrics, nodeHandlers)
+	nodeStore, err := watchNodeEvents(ctx, logger, handle.ClientSet(), watchMetrics, *config, nodeHandlers)
 	if err != nil {
 		return nil, fmt.Errorf("could not start watch on Node events: %w", err)
 	}
 
 	podHandlers := watchHandlers[*corev1.Pod](reconcileQueue, initEvents)
-	podStore, err := watchPodEvents(ctx, logger, handle.ClientSet(), watchMetrics, podHandlers)
+	podStore, err := watchPodEvents(ctx, logger, handle.ClientSet(), watchMetrics, *config, podHandlers)
 	if err != nil {
 		return nil, fmt.Errorf("could not start watch on Pod events: %w", err)
 	}
@@ -113,7 +113,7 @@ func NewAutoscaleEnforcerPlugin(
 	// we make these handlers with nil instead of initEvents so that we're not blocking plugin setup
 	// on the migration objects being handled.
 	vmmHandlers := watchHandlers[*vmv1.VirtualMachineMigration](reconcileQueue, nil)
-	if err := watchMigrationEvents(ctx, logger, vmClient, watchMetrics, vmmHandlers); err != nil {
+	if err := watchMigrationEvents(ctx, logger, vmClient, watchMetrics, *config, vmmHandlers); err != nil {
 		return nil, fmt.Errorf("could not start watch on VirtualMachineMigration events: %w", err)
 	}
 
