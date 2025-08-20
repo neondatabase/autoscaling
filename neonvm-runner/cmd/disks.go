@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"math"
 	"os"
@@ -13,6 +14,11 @@ import (
 	"strings"
 
 	"github.com/alessio/shellescape"
+	"github.com/diskfs/go-diskfs"
+	"github.com/diskfs/go-diskfs/disk"
+	"github.com/diskfs/go-diskfs/filesystem"
+	"github.com/diskfs/go-diskfs/partition/gpt"
+	"github.com/diskfs/go-diskfs/partition/mbr"
 	"github.com/kdomanski/iso9660"
 	"go.uber.org/zap"
 
@@ -26,7 +32,7 @@ const (
 	runtimeDiskPath = "/vm/images/runtime.iso"
 	mountedDiskPath = "/vm/images"
 
-	toolsDiskPath = "/vm/tools.iso"
+	toolsDiskPath = "/vm/tools.img"
 
 	sshAuthorizedKeysDiskPath   = "/vm/images/ssh-authorized-keys.iso"
 	sshAuthorizedKeysMountPoint = "/vm/ssh"
@@ -49,10 +55,10 @@ func setupVMDisks(
 
 	{
 		name := "vm-tools"
-		if err := createISO9660FromPath(logger, name, toolsDiskPath, cfg.toolsPath); err != nil {
-			return nil, fmt.Errorf("Failed to create ISO9660 image: %w", err)
+		if err := createFAT32FromPath(logger, name, toolsDiskPath, cfg.toolsPath); err != nil {
+			return nil, fmt.Errorf("Failed to create disk image: %w", err)
 		}
-		qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=cdrom,cache=none", name, toolsDiskPath))
+		qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,format=raw,media=disk,readonly=on", name, toolsDiskPath))
 	}
 
 	if enableSSH {
@@ -195,7 +201,8 @@ func createISO9660runtime(
 
 	// Add tools.
 	mounts = append(mounts, "/neonvm/bin/mkdir -p /neonvm/tools")
-	mounts = append(mounts, "/neonvm/bin/mount -t iso9660 -o ro,exec $(/neonvm/bin/blkid -L vm-tools) /neonvm/tools")
+	// mounts = append(mounts, "/neonvm/bin/mount -t vfat -o ro,exec $(/neonvm/bin/blkid -L vm-tools) /neonvm/tools")
+	mounts = append(mounts, "/neonvm/bin/mount -o ro,exec $(/neonvm/bin/blkid -L vm-tools) /neonvm/tools")
 
 	if len(disks) != 0 {
 		for _, disk := range disks {
@@ -293,7 +300,7 @@ func createISO9660runtime(
 	return nil
 }
 
-func calcDirUsage(dirPath string) (int64, error) {
+func calcDirSize(dirPath string) (int64, error) {
 	stat, err := os.Lstat(dirPath)
 	if err != nil {
 		return 0, err
@@ -320,7 +327,7 @@ func calcDirUsage(dirPath string) (int64, error) {
 		if file.Name() == "." || file.Name() == ".." {
 			continue
 		}
-		s, err := calcDirUsage(dirPath + "/" + file.Name())
+		s, err := calcDirSize(dirPath + "/" + file.Name())
 		if err != nil {
 			return size, err
 		}
@@ -363,7 +370,7 @@ func createQCOW2(diskName string, diskPath string, diskSize *resource.Quantity, 
 	if diskSize != nil {
 		ext4blockCount = diskSize.Value() / ext4blockSize
 	} else if contentPath != nil {
-		dirSize, err := calcDirUsage(*contentPath)
+		dirSize, err := calcDirSize(*contentPath)
 		if err != nil {
 			return err
 		}
@@ -405,6 +412,244 @@ func createQCOW2(diskName string, diskPath string, diskSize *resource.Quantity, 
 
 	// uid=36(qemu) gid=34(kvm) groups=34(kvm)
 	if err := execFg("chown", "36:34", diskPath); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func createExt4FromPath(logger *zap.Logger, diskName string, diskPath string, contentPath string) error {
+	totalSize, err := calcDirSize(contentPath)
+	if err != nil {
+		return err
+	}
+	// Add 10% overhead and minimum 32MB
+	imgSize := max(totalSize+totalSize/10, 32*1024*1024)
+
+	os.Remove(diskPath) // remove old file if exists
+
+	theDisk, err := diskfs.Create(diskPath, imgSize, diskfs.SectorSizeDefault)
+	if err != nil {
+		return err
+	}
+
+	sectorSize := uint64(512)
+	start := uint64(2048) // 1 MiB
+
+	// How many total sectors we have:
+	totalSectors := uint64(imgSize) / sectorSize
+
+	end := totalSectors - 1 // use everything after start
+	partitionSectors := end - start + 1
+	partitionSizeBytes := partitionSectors * sectorSize
+
+	table := &gpt.Table{
+		LogicalSectorSize:  512,
+		PhysicalSectorSize: 512,
+		ProtectiveMBR:      false,
+		Partitions: []*gpt.Partition{
+			{
+				Start: uint64(start),
+				End:   uint64(end),
+				Size:  uint64(partitionSizeBytes),
+				Name:  diskName,
+				Type:  gpt.LinuxFilesystem,
+			},
+		},
+	}
+
+	err = theDisk.Partition(table)
+	if err != nil {
+		logger.Error("Failed to partition disk", zap.Error(err))
+		return err
+	}
+
+	ext, err := theDisk.CreateFilesystem(disk.FilesystemSpec{
+		Partition: 0,
+		FSType:    filesystem.TypeExt4,
+	})
+
+	if err != nil {
+		logger.Error("Failed to create ext4 filesystem", zap.Error(err))
+		return err
+	}
+
+	ext.SetLabel(diskName)
+
+	err = filepath.WalkDir(contentPath, func(filePath string, d fs.DirEntry, err error) error {
+		if err != nil {
+			logger.Info("Couldn't walk through dir", zap.String("path", filePath), zap.Error(err))
+			return err
+		}
+
+		relPath, err := filepath.Rel(contentPath, filePath)
+		if err != nil {
+			// return err
+			return nil
+		}
+
+		relPath = "/" + relPath // Ensure the path starts with a slash for FAT32
+
+		if d.IsDir() {
+			err = ext.Mkdir(relPath)
+			if err != nil {
+				logger.Info("Couldn't create directory in ext4", zap.String("path", filePath), zap.Error(err))
+				return err
+			}
+			return nil
+		}
+
+		// resolved, err := filepath.EvalSymlinks(filePath)
+		// if err != nil {
+		// 	logger.Info("Couldn't eval symlinks", zap.String("path", filePath), zap.Error(err))
+		// 	return nil
+		// }
+
+		// resolvedStat, err := os.Stat(resolved)
+		// if err != nil || resolvedStat.IsDir() {
+		// 	return nil
+		// }
+
+		logger.Info("Adding file to ext4 disk", zap.String("diskname", diskName), zap.String("path", relPath))
+
+		src, err := os.Open(filePath)
+		if err != nil {
+			// return err
+			logger.Info("Couldn't open file for copying", zap.String("path", filePath), zap.Error(err))
+			return nil
+		}
+		defer src.Close()
+
+		// dest, err := fat.OpenFile(relPath, os.O_CREATE|os.O_RDWR)
+		dest, err := ext.OpenFile(relPath, os.O_CREATE|os.O_RDWR)
+		if err != nil {
+			logger.Info("Couldn't open file in ext4 for writing", zap.String("path", relPath), zap.Error(err))
+			return err
+		}
+		defer dest.Close()
+
+		_, err = io.Copy(dest, src)
+		return err
+	})
+
+	if err != nil {
+		return err
+	}
+
+	err = os.Chown(diskPath, 36, 34)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func createFAT32FromPath(logger *zap.Logger, diskName string, diskPath string, contentPath string) error {
+	totalSize, err := calcDirSize(contentPath)
+	if err != nil {
+		return err
+	}
+	// Add 10% overhead and minimum 32MB
+	imgSize := max(totalSize+totalSize/10, 32*1024*1024)
+
+	os.Remove(diskPath) // remove old file if exists
+
+	theDisk, err := diskfs.Create(diskPath, imgSize, diskfs.SectorSizeDefault)
+	if err != nil {
+		return err
+	}
+
+	table := &mbr.Table{
+		LogicalSectorSize:  512,
+		PhysicalSectorSize: 512,
+		Partitions: []*mbr.Partition{
+			{
+				Bootable: false,
+				Type:     mbr.Linux,
+				Start:    2048,
+				Size:     20480,
+			},
+		},
+	}
+
+	err = theDisk.Partition(table)
+	if err != nil {
+		return err
+	}
+
+	fat, err := theDisk.CreateFilesystem(disk.FilesystemSpec{
+		Partition: 0,
+		FSType:    filesystem.TypeFat32,
+	})
+
+	fat.SetLabel(diskName)
+
+	if err != nil {
+		return err
+	}
+
+	err = filepath.WalkDir(contentPath, func(filePath string, d fs.DirEntry, err error) error {
+		if err != nil {
+			logger.Info("Couldn't walk through dir", zap.String("path", filePath), zap.Error(err))
+			return err
+		}
+
+		relPath, err := filepath.Rel(contentPath, filePath)
+		if err != nil {
+			// return err
+			return nil
+		}
+
+		relPath = "/" + relPath // Ensure the path starts with a slash for FAT32
+
+		if d.IsDir() {
+			err = fat.Mkdir(relPath)
+			if err != nil {
+				logger.Info("Couldn't create directory in FAT32", zap.String("path", filePath), zap.Error(err))
+				return err
+			}
+			return nil
+		}
+
+		// resolved, err := filepath.EvalSymlinks(filePath)
+		// if err != nil {
+		// 	logger.Info("Couldn't eval symlinks", zap.String("path", filePath), zap.Error(err))
+		// 	return nil
+		// }
+
+		// resolvedStat, err := os.Stat(resolved)
+		// if err != nil || resolvedStat.IsDir() {
+		// 	return nil
+		// }
+
+		logger.Info("Adding file to FAT32 disk", zap.String("diskname", diskName), zap.String("path", relPath))
+
+		src, err := os.Open(filePath)
+		if err != nil {
+			// return err
+			logger.Info("Couldn't open file for copying", zap.String("path", filePath), zap.Error(err))
+			return nil
+		}
+		defer src.Close()
+
+		// dest, err := fat.OpenFile(relPath, os.O_CREATE|os.O_RDWR)
+		dest, err := fat.OpenFile(relPath, os.O_CREATE|os.O_RDWR)
+		if err != nil {
+			logger.Info("Couldn't open file in FAT32 for writing", zap.String("path", relPath), zap.Error(err))
+			return err
+		}
+		defer dest.Close()
+
+		_, err = io.Copy(dest, src)
+		return err
+	})
+
+	if err != nil {
+		return err
+	}
+
+	err = os.Chown(diskPath, 36, 34)
+	if err != nil {
 		return err
 	}
 
@@ -459,7 +704,7 @@ func createISO9660FromPath(logger *zap.Logger, diskName string, diskPath string,
 		// run the file handling logic in a closure, so the defers happen within the loop body,
 		// rather than the outer function.
 		err = func() error {
-			logger.Info("adding file to ISO9660 disk", zap.String("path", outputPath))
+			logger.Info("adding file to ISO9660 disk", zap.String("diskname", diskName), zap.String("path", outputPath))
 			fileToAdd, err := os.Open(filePath)
 			if err != nil {
 				return err
