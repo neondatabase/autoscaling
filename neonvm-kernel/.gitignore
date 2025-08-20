@@ -1,5 +1,5 @@
 vmlinuz*
-tools/
+tools.img
 
 # Exclude files for local kernel development.
 # Otherwise certain git operations become unexpectedly very expensive.

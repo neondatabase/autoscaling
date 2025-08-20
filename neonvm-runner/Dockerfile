@@ -31,7 +31,7 @@ RUN apk add --no-cache \
     tcpdump \
     tini
 
-COPY neonvm-kernel/tools /vm/tools
+COPY neonvm-kernel/tools.img /vm/tools.img
 COPY neonvm-runner/ssh_config /etc/ssh/ssh_config
 
 ARG TARGET_ARCH

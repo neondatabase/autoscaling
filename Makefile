@@ -368,7 +368,7 @@ download-qemu-bios:
 kernel: ## Build linux kernel.
 	set -eux; \
 	rm -f neonvm-kernel/vmlinuz; \
-	rm -rf neonvm-kernel/tools; \
+	rm -rf neonvm-kernel/tools.img; \
 	kernel_version="$$(neonvm-kernel/echo-version.sh)"; \
 	version_suffix="-$$(git describe --tags --dirty= --always)"; \
 	docker buildx build \
@@ -387,7 +387,7 @@ kernel: ## Build linux kernel.
 		neonvm-kernel; \
 	id=$$(docker create neonvm-kernel:dev); \
 	docker cp $$id:/vmlinuz neonvm-kernel/vmlinuz-$(TARGET_ARCH); \
-	docker cp $$id:/tools neonvm-kernel/tools; \
+	docker cp $$id:/tools.img neonvm-kernel/tools.img; \
 	docker rm -f $$id
 
 .PHONY: kernel-source

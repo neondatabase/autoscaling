@@ -122,6 +122,10 @@ ARG VERSION_SUFFIX
 COPY --from=build_kernel_amd64 /build/linux-${KERNEL_VERSION}/arch/x86/boot/bzImage /vmlinuz
 COPY --from=build_kernel_amd64 /build/linux-headers /tools/lib/modules/${KERNEL_VERSION}${VERSION_SUFFIX}
 COPY --from=build_tools_amd64 /build/linux-${KERNEL_VERSION}/tools/perf/perf /tools/bin/perf
+RUN apk update && apk add e2fsprogs && DIR_SIZE=$(du -sm /tools | cut -f1) \
+    && BUFFER_SIZE=$((DIR_SIZE + DIR_SIZE / 5)) \
+    && dd if=/dev/zero of=/tools.img bs=1M count=$BUFFER_SIZE \
+    && mkfs.ext4 -L vm-tools -d /tools /tools.img
 
 # Build the kernel on arm64
 FROM build-kernel-deps AS build_kernel_arm64
@@ -157,6 +161,11 @@ ARG VERSION_SUFFIX
 COPY --from=build_kernel_arm64 /build/linux-${KERNEL_VERSION}/arch/arm64/boot/Image /vmlinuz
 COPY --from=build_kernel_arm64 /build/linux-headers /tools/lib/modules/${KERNEL_VERSION}${VERSION_SUFFIX}
 COPY --from=build_tools_arm64 /build/linux-${KERNEL_VERSION}/tools/perf/perf /tools/bin/perf
+RUN apk update && apk add e2fsprogs \
+    && DIR_SIZE=$(du -sm /tools | cut -f1) \
+    && BUFFER_SIZE=$((DIR_SIZE + DIR_SIZE / 5)) \
+    && dd if=/dev/zero of=/tools.img bs=1M count=$BUFFER_SIZE \
+    && mkfs.ext4 -L vm-tools -d /tools /tools.img
 
 # Dummy default target without target architecture
 FROM ubuntu:$UBUNTU_IMG_TAG$UBUNTU_IMG_SHA

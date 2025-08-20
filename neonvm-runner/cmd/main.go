@@ -45,7 +45,6 @@ const (
 	architectureArm64 = "arm64"
 	architectureAmd64 = "amd64"
 	defaultKernelPath = "/vm/kernel/vmlinuz"
-	defaultToolsPath  = "/vm/tools"
 
 	qmpUnixSocketForSigtermHandler = "/vm/qmp-sigterm.sock"
 	logSerialSocket                = "/vm/log.sock"
@@ -105,7 +104,6 @@ type Config struct {
 	vmSpecDump           string
 	vmStatusDump         string
 	kernelPath           string
-	toolsPath            string
 	appendKernelCmdline  string
 	skipCgroupManagement bool
 	diskCacheSettings    string
@@ -124,7 +122,6 @@ func newConfig(logger *zap.Logger) *Config {
 		vmSpecDump:           "",
 		vmStatusDump:         "",
 		kernelPath:           defaultKernelPath,
-		toolsPath:            defaultToolsPath,
 		appendKernelCmdline:  "",
 		skipCgroupManagement: false,
 		diskCacheSettings:    "cache=none",
@@ -139,8 +136,6 @@ func newConfig(logger *zap.Logger) *Config {
 		"Base64 gzip compressed VirtualMachine json status")
 	flag.StringVar(&cfg.kernelPath, "kernelpath", cfg.kernelPath,
 		"Override path for kernel to use")
-	flag.StringVar(&cfg.toolsPath, "toolspath", cfg.toolsPath,
-		"Override path for the tools directory")
 	flag.StringVar(&cfg.appendKernelCmdline, "appendKernelCmdline",
 		cfg.appendKernelCmdline, "Additional kernel command line arguments")
 	flag.BoolVar(&cfg.skipCgroupManagement, "skip-cgroup-management",
