@@ -470,7 +470,6 @@ func createISO9660FromPath(logger *zap.Logger, diskName string, diskPath string,
 
 		return nil
 	})
-
 	if err != nil {
 		return err
 	}
