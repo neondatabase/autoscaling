@@ -95,7 +95,7 @@ docker run --rm -v $PWD:/host --name kernel-build -it kernel-build-deps bash
 
 The docker image also contains the **tools** - useful stuff which can
 **ONLY** be provided at the same time as the kernel. That means, either
-those are the such tools that have a direct dependency on the kernel
+those are such tools that have a direct dependency on the kernel
 version, or the tools built from the same repository as the kernel
 (like `perf`), or anything else dependent on the kernel.
 
@@ -104,3 +104,10 @@ them. Its structure is the same as if the internals were installed onto
 the host the usual way, so `<tools>/bin` is the path for the binaries,
 `<tools>/include` for the include files, `<tools>/lib` for the libraries
 and so on.
+
+To make it easier to deploy it inside the VM, the tools are packaged
+into an ext4 filesystem and then put into a disk image file with one
+partition with this filesystem. Later it can be simply attached to the
+environment (`qemu`, for example), or mounted to the local filesystem.
+
+The image file is called `tools.img` and is labelled `vm-tools`.
