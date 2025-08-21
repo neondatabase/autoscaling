@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"math"
 	"os"
 	"os/exec"
@@ -25,6 +26,8 @@ const (
 	runtimeDiskPath = "/vm/images/runtime.iso"
 	mountedDiskPath = "/vm/images"
 
+	toolsDiskPath = "/vm/tools.img"
+
 	sshAuthorizedKeysDiskPath   = "/vm/images/ssh-authorized-keys.iso"
 	sshAuthorizedKeysMountPoint = "/vm/ssh"
 
@@ -34,15 +37,20 @@ const (
 // setupVMDisks creates the disks for the VM and returns the appropriate QEMU args
 func setupVMDisks(
 	logger *zap.Logger,
-	diskCacheSettings string,
+	cfg *Config,
 	enableSSH bool,
 	swapSize *resource.Quantity,
 	extraDisks []vmv1.Disk,
 ) ([]string, error) {
 	var qemuCmd []string
 
-	qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=rootdisk,file=%s,if=virtio,media=disk,index=0,%s", rootDiskPath, diskCacheSettings))
+	qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=rootdisk,file=%s,if=virtio,media=disk,index=0,%s", rootDiskPath, cfg.diskCacheSettings))
 	qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=runtime,file=%s,if=virtio,media=cdrom,readonly=on,cache=none", runtimeDiskPath))
+
+	{
+		name := "vm-tools"
+		qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,format=raw,media=disk,readonly=on", name, toolsDiskPath))
+	}
 
 	if enableSSH {
 		name := "ssh-authorized-keys"
@@ -58,7 +66,7 @@ func setupVMDisks(
 		if err := createSwap(dPath, swapSize); err != nil {
 			return nil, fmt.Errorf("failed to create swap disk: %w", err)
 		}
-		qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=disk,%s,discard=unmap", swapName, dPath, diskCacheSettings))
+		qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=disk,%s,discard=unmap", swapName, dPath, cfg.diskCacheSettings))
 	}
 
 	for _, disk := range extraDisks {
@@ -73,7 +81,7 @@ func setupVMDisks(
 			if disk.EmptyDisk.Discard {
 				discard = ",discard=unmap"
 			}
-			qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=disk,%s%s", disk.Name, dPath, diskCacheSettings, discard))
+			qemuCmd = append(qemuCmd, "-drive", fmt.Sprintf("id=%s,file=%s,if=virtio,media=disk,%s%s", disk.Name, dPath, cfg.diskCacheSettings, discard))
 		case disk.ConfigMap != nil || disk.Secret != nil:
 			dPath := fmt.Sprintf("%s/%s.iso", mountedDiskPath, disk.Name)
 			mnt := fmt.Sprintf("/vm/mounts%s", disk.MountPath)
@@ -175,12 +183,16 @@ func createISO9660runtime(
 	}
 	if enableSSH {
 		mounts = append(mounts, "/neonvm/bin/mkdir -p /mnt/ssh")
-		mounts = append(mounts, "/neonvm/bin/mount  -t iso9660 -o ro,mode=0644 $(/neonvm/bin/blkid -L ssh-authorized-keys) /mnt/ssh")
+		mounts = append(mounts, "/neonvm/bin/mount -t iso9660 -o ro,mode=0644 $(/neonvm/bin/blkid -L ssh-authorized-keys) /mnt/ssh")
 	}
 
 	if swapSize != nil {
 		mounts = append(mounts, fmt.Sprintf("/neonvm/bin/sh /neonvm/runtime/resize-swap-internal.sh %d", swapSize.Value()))
 	}
+
+	// Add tools.
+	mounts = append(mounts, "/neonvm/bin/mkdir -p /neonvm/tools")
+	mounts = append(mounts, "/neonvm/bin/mount -o ro,exec $(/neonvm/bin/blkid -L vm-tools) /neonvm/tools")
 
 	if len(disks) != 0 {
 		for _, disk := range disks {
@@ -278,7 +290,7 @@ func createISO9660runtime(
 	return nil
 }
 
-func calcDirUsage(dirPath string) (int64, error) {
+func calcDirSize(dirPath string) (int64, error) {
 	stat, err := os.Lstat(dirPath)
 	if err != nil {
 		return 0, err
@@ -305,7 +317,7 @@ func calcDirUsage(dirPath string) (int64, error) {
 		if file.Name() == "." || file.Name() == ".." {
 			continue
 		}
-		s, err := calcDirUsage(dirPath + "/" + file.Name())
+		s, err := calcDirSize(dirPath + "/" + file.Name())
 		if err != nil {
 			return size, err
 		}
@@ -348,7 +360,7 @@ func createQCOW2(diskName string, diskPath string, diskSize *resource.Quantity, 
 	if diskSize != nil {
 		ext4blockCount = diskSize.Value() / ext4blockSize
 	} else if contentPath != nil {
-		dirSize, err := calcDirUsage(*contentPath)
+		dirSize, err := calcDirSize(*contentPath)
 		if err != nil {
 			return err
 		}
@@ -403,44 +415,48 @@ func createISO9660FromPath(logger *zap.Logger, diskName string, diskPath string,
 	}
 	defer writer.Cleanup() //nolint:errcheck // Nothing to do with the error, maybe log it ? TODO
 
-	dir, err := os.Open(contentPath)
-	if err != nil {
-		return err
-	}
-	dirEntrys, err := dir.ReadDir(0)
-	if err != nil {
-		return err
-	}
-
-	for _, file := range dirEntrys {
-		fileName := fmt.Sprintf("%s/%s", contentPath, file.Name())
-		outputPath := file.Name()
-
-		if file.IsDir() {
-			continue
+	err = filepath.WalkDir(contentPath, func(filePath string, d fs.DirEntry, err error) error {
+		if err != nil {
+			logger.Info("Couldn't walk through dir", zap.String("path", filePath), zap.Error(err))
+			return err
 		}
+
+		if d.IsDir() {
+			// Skip directories, we only want to add files.
+			logger.Info("Skipping subdir", zap.String("path", filePath))
+			return nil
+		}
+
 		// try to resolve symlink and check resolved file IsDir
-		resolved, err := filepath.EvalSymlinks(fileName)
+		resolved, err := filepath.EvalSymlinks(filePath)
 		if err != nil {
-			return err
+			logger.Info("Couldn't eval symlinks", zap.String("path", filePath), zap.Error(err))
+			return nil
 		}
-		resolvedOpen, err := os.Open(resolved)
+
+		resolvedStat, err := os.Stat(resolved)
 		if err != nil {
-			return err
-		}
-		resolvedStat, err := resolvedOpen.Stat()
-		if err != nil {
+			logger.Info("Couldn't stat", zap.String("path", filePath), zap.String("resolvedPath", resolved), zap.Error(err))
 			return err
 		}
 		if resolvedStat.IsDir() {
-			continue
+			logger.Info("Skipping resolved directory", zap.String("path", filePath), zap.String("resolvedPath", resolved))
+			return nil
 		}
+
+		// Calculate the relative path for the ISO (preserving directory structure)
+		relPath, err := filepath.Rel(contentPath, filePath)
+		if err != nil {
+			logger.Info("Failed to get relative path", zap.String("filePath", filePath), zap.Error(err))
+			return err
+		}
+		outputPath := relPath // Use relative path to maintain directory structure in ISO
 
 		// run the file handling logic in a closure, so the defers happen within the loop body,
 		// rather than the outer function.
 		err = func() error {
-			logger.Info("adding file to ISO9660 disk", zap.String("path", outputPath))
-			fileToAdd, err := os.Open(fileName)
+			logger.Info("adding file to ISO9660 disk", zap.String("diskname", diskName), zap.String("path", outputPath))
+			fileToAdd, err := os.Open(filePath)
 			if err != nil {
 				return err
 			}
@@ -451,6 +467,11 @@ func createISO9660FromPath(logger *zap.Logger, diskName string, diskPath string,
 		if err != nil {
 			return err
 		}
+
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 
 	outputFile, err := os.OpenFile(diskPath, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0o644)
