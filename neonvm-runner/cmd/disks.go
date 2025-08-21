@@ -431,7 +431,6 @@ func createISO9660FromPath(logger *zap.Logger, diskName string, diskPath string,
 		resolved, err := filepath.EvalSymlinks(filePath)
 		if err != nil {
 			logger.Info("Couldn't eval symlinks", zap.String("path", filePath), zap.Error(err))
-			// return err
 			return nil
 		}
 

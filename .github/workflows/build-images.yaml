@@ -211,7 +211,7 @@ jobs:
           docker pull --quiet $IMAGE
           ID=$(docker create $IMAGE true)
           docker cp ${ID}:/vmlinuz neonvm-kernel/vmlinuz-$ARCH
-          docker cp ${ID}:/tools neonvm-kernel/tools
+          docker cp ${ID}:/tools.img neonvm-kernel/tools.img
           docker rm -f ${ID}
 
       - name: Get QEMU BIOS for platform
