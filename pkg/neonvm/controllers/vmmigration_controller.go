@@ -327,15 +327,15 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 			}
 			// Migrate only running VMs to target with plugged devices
 			if vm.Status.Phase == vmv1.VmPreMigrating {
+				// trigger migration
+				if err := QmpStartMigration(vm, migration); err != nil {
+					migration.Status.Phase = vmv1.VmmFailed
+					return ctrl.Result{}, err
+				}
 				// update VM status
 				vm.Status.Phase = vmv1.VmMigrating
 				if err := r.Status().Update(ctx, vm); err != nil {
 					log.Error(err, "Failed to update VirtualMachine status to 'Migrating'")
-					return ctrl.Result{}, err
-				}
-				// trigger migration
-				if err := QmpStartMigration(vm, migration); err != nil {
-					migration.Status.Phase = vmv1.VmmFailed
 					return ctrl.Result{}, err
 				}
 				message := fmt.Sprintf("Migration was started to target runner (%s)", targetRunner.Name)
