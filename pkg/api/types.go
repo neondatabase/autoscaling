@@ -500,6 +500,19 @@ type Allocation struct {
 
 // ** Types sent by monitor **
 
+// This type is sent to the agent as a way to request downscale/upscale to
+// the given size. Since the agent cannot control if the agent will choose
+// to upscale the VM, it does not return anything. If the scale request
+// results in upscaling, the agent will send an UpscaleNotification when
+// the upscaling happens. If it results in downscaling, the agent will
+// request the downscaling with the DownscaleRequest message. (XXX: The extra
+// DownscaleRequest + DownscaleResult dance is a bit silly when the VM initiates
+// the scaling with a ScaleRequest message. It would make sense for the VM
+// to perform any downscale actions before sending the ScaleRequest.)
+type ScaleRequest struct {
+	Target Allocation `json:"target"`
+}
+
 // This type is sent to the agent as a way to request immediate upscale.
 // Since the agent cannot control if the agent will choose to upscale the VM,
 // it does not return anything. If an upscale is granted, the agent will notify

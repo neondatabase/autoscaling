@@ -173,6 +173,9 @@ type pluginRequested struct {
 type monitorState struct {
 	OngoingRequest *ongoingMonitorRequest
 
+	// Last received desired VM size received from the vm-monitor.
+	RequestedScale *requestedScale
+
 	// RequestedUpscale, if not nil, stores the most recent *unresolved* upscaling requested by the
 	// vm-monitor, along with the time at which it occurred.
 	RequestedUpscale *requestedUpscale
@@ -211,6 +214,11 @@ const (
 	monitorRequestKindDownscale monitorRequestKind = "downscale"
 	monitorRequestKindUpscale   monitorRequestKind = "upscale"
 )
+
+type requestedScale struct {
+	At     time.Time
+	Target api.Allocation
+}
 
 type requestedUpscale struct {
 	At        time.Time
@@ -256,6 +264,7 @@ func NewState(vm api.VmInfo, config Config) *State {
 			},
 			Monitor: monitorState{
 				OngoingRequest:     nil,
+				RequestedScale:     nil,
 				RequestedUpscale:   nil,
 				DeniedDownscale:    nil,
 				Approved:           nil,
@@ -303,10 +312,25 @@ func (s *State) NextActions(now time.Time) ActionSet {
 func (s *state) nextActions(now time.Time) ActionSet {
 	var actions ActionSet
 
-	desiredResources, calcDesiredResourcesWait := s.desiredResourcesFromMetricsOrRequestedUpscaling(now)
-	if calcDesiredResourcesWait == nil {
-		// our handling later on is easier if we can assume it's non-nil
+	var desiredResources api.Resources
+	var calcDesiredResourcesWait func(ActionSet) *time.Duration
+
+	// If the VM directly requested a specific size, try to satisfy it. Otherwise, calculate
+	// the desired size from the metrics we collect from the VM.
+	//
+	// New vm-monitor versions specify the size directly, the calculation based on metrics
+	// is for old computes running with older vm-monitor versions. If we ever receive a direct
+	// size request from the VM, we assume that it's running a new version and "stick" to
+	// that mode for that VM thereafter.
+	if s.Monitor.RequestedScale != nil {
+		desiredResources = s.desiredResourcesFromRequestedScale(now, s.Monitor.RequestedScale)
 		calcDesiredResourcesWait = func(ActionSet) *time.Duration { return nil }
+	} else {
+		desiredResources, calcDesiredResourcesWait = s.desiredResourcesFromMetricsOrRequestedUpscaling(now)
+		if calcDesiredResourcesWait == nil {
+			// our handling later on is easier if we can assume it's non-nil
+			calcDesiredResourcesWait = func(ActionSet) *time.Duration { return nil }
+		}
 	}
 
 	// ----
@@ -708,6 +732,38 @@ func (s *state) scalingConfig() api.ScalingConfig {
 // public version, for testing.
 func (s *State) DesiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (api.Resources, func(ActionSet) *time.Duration) {
 	return s.internal.desiredResourcesFromMetricsOrRequestedUpscaling(now)
+}
+
+func (s *state) desiredResourcesFromRequestedScale(now time.Time, request: Allocation) api.Resources {
+	// There's some annoying edge cases that this function has to be able to handle properly. For
+	// the sake of completeness, they are:
+	//
+	// 1. s.vm.Using() is not a multiple of s.computeUnit
+	// 2. s.vm.Max() is less than s.computeUnit (or: has at least one resource that is)
+	// 3. s.vm.Using() is a fractional multiple of s.computeUnit, but !allowDecrease and rounding up
+	//    is greater than s.vm.Max()
+	// 4. s.vm.Using() is much larger than s.vm.Min() and not a multiple of s.computeUnit, but load
+	//    is low so we should just decrease *anyways*.
+	//
+	// ---
+	//
+
+	// resources for the desired "goal" compute units
+	var goalResources api.Resources
+
+	cpuGoalCU := uint32(math.Round(request.Cpu / s.Config.ComputeUnit.VCPU.AsFloat64()))
+
+	memGoalBytes := api.Bytes(request.Mem)
+	memGoalCU := uint32(memGoalBytes / s.Config.ComputeUnit.Mem)
+
+	goalCU := util.Max(cpuGoalCU, memGoalCU)
+
+	// bound goalResources by the minimum and maximum resource amounts for the VM
+	result := goalResources.Min(s.VM.Max()).Max(s.VM.Min())
+
+	s.info("Using desired resources from VM", zap.Object("current", s.VM.Using()), zap.Object("target", result))
+
+	return result
 }
 
 func (s *state) desiredResourcesFromMetricsOrRequestedUpscaling(now time.Time) (api.Resources, func(ActionSet) *time.Duration) {
@@ -1152,6 +1208,7 @@ func (s *State) Monitor() MonitorHandle {
 func (h MonitorHandle) Reset() {
 	h.s.Monitor = monitorState{
 		OngoingRequest:     nil,
+		RequestedScale:     nil,
 		RequestedUpscale:   nil,
 		DeniedDownscale:    nil,
 		Approved:           nil,
@@ -1167,6 +1224,13 @@ func (h MonitorHandle) Active(active bool) {
 		h.s.Monitor.Approved = &approved // TODO: this is racy
 	} else {
 		h.s.Monitor.Approved = nil
+	}
+}
+
+func (h MonitorHandle) ScaleRequested(now time.Time, resources api.Allocation) {
+	h.s.Monitor.RequestedScale = &requestedScale{
+		At:     now,
+		Target: resources,
 	}
 }
 

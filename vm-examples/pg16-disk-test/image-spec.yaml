@@ -47,7 +47,7 @@ build: |
   RUN apk add musl-dev git openssl-dev
 
   # Which branch to pull from
-  ENV BRANCH main
+  ENV BRANCH heikki/wip-autoscale-api
 
   # Ensures we reclone upon new commits
   # https://stackoverflow.com/questions/35134713
