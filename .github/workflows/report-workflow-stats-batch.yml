@@ -1,11 +1,5 @@
 name: Report Workflow Stats Batch
 
-on:
-  schedule:
-    - cron: '*/15 * * * *'
-    - cron: '25 0 * * *'
-    - cron: '25 1 * * 6'
-
 permissions:
   contents: read
 
