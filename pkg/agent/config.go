@@ -101,6 +101,11 @@ type MetricsSourceConfig struct {
 	RequestTimeoutSeconds uint `json:"requestTimeoutSeconds"`
 	// SecondsBetweenRequests sets the number of seconds to wait between metrics requests
 	SecondsBetweenRequests uint `json:"secondsBetweenRequests"`
+	// FirstRequestWithinSeconds sets the maximum number of seconds to wait for the first request.
+	//
+	// This is useful for cases where we don't want to fetch metrics very frequently, but we don't
+	// want to wait too long to get them, because they're required for decision-making.
+	FirstRequestWithinSeconds uint `json:"firstRequestWithinSeconds"`
 }
 
 // SchedulerConfig defines a few parameters for scheduler requests
@@ -223,6 +228,7 @@ func (c *Config) validate() error {
 		erc.Whenf(ec, cfg.Port == 0, zeroTmpl, fmt.Sprintf(".metrics.%s.port", key))
 		erc.Whenf(ec, cfg.RequestTimeoutSeconds == 0, zeroTmpl, fmt.Sprintf(".metrics.%s.requestTimeoutSeconds", key))
 		erc.Whenf(ec, cfg.SecondsBetweenRequests == 0, zeroTmpl, fmt.Sprintf(".metrics.%s.secondsBetweenRequests", key))
+		erc.Whenf(ec, cfg.FirstRequestWithinSeconds == 0, zeroTmpl, fmt.Sprintf(".metrics.%s.firstRequestWithinSeconds", key))
 	}
 	validateMetricsConfig(c.Metrics.System, "system")
 	validateMetricsConfig(c.Metrics.LFC, "lfc")
