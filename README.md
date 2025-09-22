@@ -137,3 +137,27 @@ To run the end-to-end tests, you need to have [`kuttl`] installed. You can run t
 ```sh
 make e2e
 ```
+
+### `make run-e2e`
+
+During active development, when the kernel is already built and cluster created, one can do `make run-e2e` to test current code, which resolves to `make deploy vm-examples e2e`.
+
+
+## Contributing
+
+Splitting PRs into commits is preferred, as it allows for cleaner git history and makes the review easier.
+
+For all commits, we require PR number to be present in the commit subject:
+```
+  neonvm: Remove neonvm-runner version [2/2] (#1381)
+                                             ^ like that
+```
+
+This happens automatically when PRs are merged with squash. When PRs are merged with rebase, we have a helper script `scripts/git-pr-number.sh`. 
+
+Therefore, workflow becomes:
+1. Create your commits locally.
+2. Create a PR.
+3. Run `scripts/git-pr-number.sh`, it will detect there is a PR open and will adjust the commit subjects.
+4. `git push --force-with-lease origin <YOUR BRANCH>`.
+   **Warning:** Using `git push -f` (force push) can overwrite remote branch history and delete commits made by others. It is safer to use `git push --force-with-lease`, which ensures the force push only proceeds if the remote branch has not been updated since your last fetch.

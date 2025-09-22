@@ -151,7 +151,7 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 		return &vm, nil
 	}
 
-	if !migration.ObjectMeta.DeletionTimestamp.IsZero() {
+	if !migration.DeletionTimestamp.IsZero() {
 		// The object is being deleted
 		if controllerutil.ContainsFinalizer(migration, virtualmachinemigrationFinalizer) {
 			// our finalizer is present, so lets handle any external dependency
@@ -168,7 +168,7 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 			// remove our finalizer from the list and update it.
 			log.Info("Removing Finalizer from Migration")
 			if !controllerutil.RemoveFinalizer(migration, virtualmachinemigrationFinalizer) {
-				return ctrl.Result{}, errors.New("Failed to remove finalizer from Migration")
+				return ctrl.Result{}, errors.New("failed to remove finalizer from Migration")
 			}
 			if err := r.Update(ctx, migration); err != nil {
 				return ctrl.Result{}, err
@@ -183,7 +183,7 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 	if !controllerutil.ContainsFinalizer(migration, virtualmachinemigrationFinalizer) {
 		log.Info("Adding Finalizer to Migration")
 		if !controllerutil.AddFinalizer(migration, virtualmachinemigrationFinalizer) {
-			return ctrl.Result{}, errors.New("Failed to add finalizer to Migration")
+			return ctrl.Result{}, errors.New("failed to add finalizer to Migration")
 		}
 		if err := r.Update(ctx, migration); err != nil {
 			return ctrl.Result{}, err
@@ -195,7 +195,7 @@ func (r *VirtualMachineMigrationReconciler) Reconcile(ctx context.Context, req c
 	// Fetch the corresponding VirtualMachine instance
 	vm, err := getVM()
 	if err != nil {
-		log.Error(err, "Failed to get VM", "VmName", migration.Spec.VmName)
+		log.Error(err, "failed to get VM", "VmName", migration.Spec.VmName)
 		if apierrors.IsNotFound(err) {
 			// stop reconcile loop if vm not found (already deleted?)
 			message := fmt.Sprintf("VM (%s) not found", migration.Spec.VmName)

@@ -40,7 +40,7 @@ func main() {
 func runProgram(logger *zap.Logger) (err error) {
 	conf, err := plugin.ReadConfig(plugin.DefaultConfigPath)
 	if err != nil {
-		return fmt.Errorf("Error reading config at %q: %w", plugin.DefaultConfigPath, err)
+		return fmt.Errorf("error reading config at %q: %w", plugin.DefaultConfigPath, err)
 	}
 
 	// this: listens for sigterm, when we catch that signal, the

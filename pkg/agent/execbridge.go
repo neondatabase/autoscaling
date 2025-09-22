@@ -124,7 +124,7 @@ func (iface *execNeonVMInterface) Request(
 			ps.failedNeonVMRequestCounter.Inc()
 			return ps
 		})
-		return fmt.Errorf("Error making VM patch request: %w", err)
+		return fmt.Errorf("error making VM patch request: %w", err)
 	}
 
 	return nil
