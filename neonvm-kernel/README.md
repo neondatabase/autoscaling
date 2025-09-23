@@ -26,7 +26,7 @@ make olddefconfig ARCH=x86_64  # or ARCH=arm64
 
 # OR
 
-# Interactively review all new config options 
+# Interactively review all new config options
 make oldconfig ARCH=x86_64  # or ARCH=arm64
 ```
 
@@ -90,3 +90,24 @@ docker build --build-arg KERNEL_VERSION=6.6.64 --platform linux/x86_64 --target 
 docker run --rm -v $PWD:/host --name kernel-build -it kernel-build-deps bash
 # inside that bash shell, do the menuconfig, then copy-out the config to /host
 ```
+
+## Tools
+
+The docker image also contains the **tools** - useful stuff which can
+**ONLY** be provided at the same time as the kernel. That means, either
+those are such tools that have a direct dependency on the kernel
+version, or the tools built from the same repository as the kernel
+(like `perf`), or anything else dependent on the kernel.
+
+The `tools` is a **root** directory for this environment which provides
+them. Its structure is the same as if the internals were installed onto
+the host the usual way, so `<tools>/bin` is the path for the binaries,
+`<tools>/include` for the include files, `<tools>/lib` for the libraries
+and so on.
+
+To make it easier to deploy it inside the VM, the tools are packaged
+into an ext4 filesystem and then put into a disk image file with one
+partition with this filesystem. Later it can be simply attached to the
+environment (`qemu`, for example), or mounted to the local filesystem.
+
+The image file is called `tools.img` and is labelled `vm-tools`.

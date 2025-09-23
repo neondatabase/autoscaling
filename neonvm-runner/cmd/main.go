@@ -321,7 +321,7 @@ func buildQEMUCmd(
 		"-device", "virtserialport,chardev=log,name=tech.neon.log.0",
 	}
 
-	qemuDiskArgs, err := setupVMDisks(logger, cfg.diskCacheSettings, enableSSH, swapSize, vmSpec.Disks)
+	qemuDiskArgs, err := setupVMDisks(logger, cfg, enableSSH, swapSize, vmSpec.Disks)
 	if err != nil {
 		return nil, err
 	}

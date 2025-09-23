@@ -368,8 +368,9 @@ download-qemu-bios:
 kernel: ## Build linux kernel.
 	set -eux; \
 	rm -f neonvm-kernel/vmlinuz; \
+	rm -rf neonvm-kernel/tools.img; \
 	kernel_version="$$(neonvm-kernel/echo-version.sh)"; \
-	version_suffix="-local-$$(date -u '+%FT%TZ')-$$(git describe --dirty)"; \
+	version_suffix="-$$(git describe --tags --dirty= --always)"; \
 	docker buildx build \
 		--tag neonvm-kernel:dev \
 		--build-arg UBUNTU_IMG_TAG=$(UBUNTU_IMG_TAG) \
@@ -386,6 +387,7 @@ kernel: ## Build linux kernel.
 		neonvm-kernel; \
 	id=$$(docker create neonvm-kernel:dev); \
 	docker cp $$id:/vmlinuz neonvm-kernel/vmlinuz-$(TARGET_ARCH); \
+	docker cp $$id:/tools.img neonvm-kernel/tools.img; \
 	docker rm -f $$id
 
 .PHONY: kernel-source
@@ -596,7 +598,7 @@ k3d-setup: k3d kubectl logs-dir-setup ## Create local cluster by k3d tool and pr
 		--config k3d/config.yaml \
 		--volume "$(PWD)/tests/logs:/logs@all" \
 		$(if $(USE_REGISTRIES_FILE),--registry-config=k3d/registries.yaml)
-		
+
 	$(KUBECTL) --context k3d-$(CLUSTER_NAME) apply -f k3d/cilium.yaml
 	$(KUBECTL) --context k3d-$(CLUSTER_NAME) -n kube-system rollout status daemonset  cilium
 	$(KUBECTL) --context k3d-$(CLUSTER_NAME) -n kube-system rollout status deployment cilium-operator
