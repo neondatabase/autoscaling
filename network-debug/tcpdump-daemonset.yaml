@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: tcpdump-bridge
+  namespace: kube-system
+  labels:
+    app: tcpdump-bridge
+spec:
+  selector:
+    matchLabels:
+      app: tcpdump-bridge
+  template:
+    metadata:
+      labels:
+        app: tcpdump-bridge
+    spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      containers:
+      - name: tcpdump
+        image: nicolaka/netshoot:latest
+        securityContext:
+          privileged: true
+          capabilities:
+            add: ["NET_ADMIN", "NET_RAW"]
+        command:
+        - /bin/sh
+        - -c
+        - /scripts/capture.sh
+        volumeMounts:
+        - name: scripts
+          mountPath: /scripts
+        - name: captures
+          mountPath: /captures
+        - name: host-run
+          mountPath: /host/run
+      volumes:
+      - name: scripts
+        configMap:
+          name: tcpdump-scripts
+          defaultMode: 0755
+      - name: captures
+        hostPath:
+          path: /var/log/tcpdump-captures
+          type: DirectoryOrCreate
+      - name: host-run
+        hostPath:
+          path: /run
+      tolerations:
+      - effect: NoSchedule
+        operator: Exists
+      - effect: NoExecute
+        operator: Exists

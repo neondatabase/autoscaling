@@ -1,0 +1,103 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: tcpdump-analyzer
+  namespace: kube-system
+  labels:
+    app: tcpdump-analyzer
+spec:
+  selector:
+    app: tcpdump-analyzer
+  ports:
+  - port: 80
+    targetPort: 8080
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tcpdump-analyzer-headless
+  namespace: kube-system
+  labels:
+    app: tcpdump-analyzer
+spec:
+  clusterIP: None
+  selector:
+    app: tcpdump-analyzer
+  ports:
+  - port: 8080
+    targetPort: 8080
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: tcpdump-analyzer
+  namespace: kube-system
+  labels:
+    app: tcpdump-analyzer
+spec:
+  selector:
+    matchLabels:
+      app: tcpdump-analyzer
+  template:
+    metadata:
+      labels:
+        app: tcpdump-analyzer
+    spec:
+      containers:
+      - name: analyzer
+        image: nicolaka/netshoot:latest
+        ports:
+        - containerPort: 8080
+        command:
+        - /bin/sh
+        - -c
+        - /scripts/analyzer.sh
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+        readinessProbe:
+          tcpSocket:
+            port: 8080
+          initialDelaySeconds: 15
+          periodSeconds: 10
+        livenessProbe:
+          tcpSocket:
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 20
+        volumeMounts:
+        - name: analyzer-scripts
+          mountPath: /scripts
+        - name: server-scripts
+          mountPath: /tmp/server.py
+          subPath: server.py
+        - name: captures
+          mountPath: /captures
+      volumes:
+      - name: analyzer-scripts
+        configMap:
+          name: analyzer-scripts
+          defaultMode: 0755
+      - name: server-scripts
+        configMap:
+          name: analyzer-server
+          defaultMode: 0644
+      - name: captures
+        hostPath:
+          path: /var/log/tcpdump-captures
+          type: DirectoryOrCreate
+      tolerations:
+      - effect: NoSchedule
+        operator: Exists
+      - effect: NoExecute
+        operator: Exists
