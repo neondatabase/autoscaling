@@ -93,10 +93,11 @@ type MetricsConfig struct {
 }
 
 type MetricsSourceConfig struct {
-	// Port is the port that VMs are expected to provide the metrics on
+	// Port and Path define the HTTP endpoint that VMs are expected to provide the metrics on
 	//
-	// For system metrics, vm-builder installs vector (from vector.dev) to expose them on port 9100.
+	// For system metrics, vm-builder installs vector (from vector.dev) to expose them on port 9100, path "/metrics".
 	Port uint16 `json:"port"`
+	Path string `json:"path"`
 	// RequestTimeoutSeconds gives the timeout duration, in seconds, for metrics requests
 	RequestTimeoutSeconds uint `json:"requestTimeoutSeconds"`
 	// SecondsBetweenRequests sets the number of seconds to wait between metrics requests
@@ -221,6 +222,7 @@ func (c *Config) validate() error {
 
 	validateMetricsConfig := func(cfg MetricsSourceConfig, key string) {
 		erc.Whenf(ec, cfg.Port == 0, zeroTmpl, fmt.Sprintf(".metrics.%s.port", key))
+		erc.Whenf(ec, cfg.Path == "", emptyTmpl, fmt.Sprintf(".metrics.%s.path", key))
 		erc.Whenf(ec, cfg.RequestTimeoutSeconds == 0, zeroTmpl, fmt.Sprintf(".metrics.%s.requestTimeoutSeconds", key))
 		erc.Whenf(ec, cfg.SecondsBetweenRequests == 0, zeroTmpl, fmt.Sprintf(".metrics.%s.secondsBetweenRequests", key))
 	}
