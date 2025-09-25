@@ -552,6 +552,9 @@ type DiskSource struct {
 	// Secret represents a secret that should populate this disk.
 	// +optional
 	Secret *corev1.SecretVolumeSource `json:"secret,omitempty"`
+	// Projected represents a projected volume that should populate this disk.
+	// +optional
+	Projected *corev1.ProjectedVolumeSource `json:"projected,omitempty"`
 	// TmpfsDisk represents a tmpfs.
 	// +optional
 	Tmpfs *TmpfsDiskSource `json:"tmpfs,omitempty"`
