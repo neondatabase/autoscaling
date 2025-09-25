@@ -1285,16 +1285,8 @@ func podSpec(
 					Image:           vm.Spec.Guest.RootDisk.Image,
 					Name:            "init",
 					ImagePullPolicy: vm.Spec.Guest.RootDisk.ImagePullPolicy,
-					VolumeMounts: []corev1.VolumeMount{{
-						Name:      "virtualmachineimages",
-						MountPath: "/vm/images",
-					}},
 					Command: []string{
-						"sh", "-c",
-						"mv /disk.qcow2 /vm/images/rootdisk.qcow2 && " +
-							/* uid=36(qemu) gid=34(kvm) groups=34(kvm) */
-							"chown 36:34 /vm/images/rootdisk.qcow2 && " +
-							"sysctl -w net.ipv4.ip_forward=1",
+						"sh", "-c", "sysctl -w net.ipv4.ip_forward=1",
 					},
 					SecurityContext: &corev1.SecurityContext{
 						Privileged: lo.ToPtr(true),
@@ -1418,7 +1410,12 @@ func podSpec(
 				images := corev1.Volume{
 					Name: "virtualmachineimages",
 					VolumeSource: corev1.VolumeSource{
-						EmptyDir: &corev1.EmptyDirVolumeSource{},
+						CSI: &corev1.CSIVolumeSource{
+							Driver: "container-image.csi.k8s.io",
+							VolumeAttributes: map[string]string{
+								"image": vm.Spec.Guest.RootDisk.Image,
+							},
+						},
 					},
 				}
 				cgroup := corev1.Volume{

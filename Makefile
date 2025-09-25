@@ -489,7 +489,7 @@ render-release: $(RENDERED) kustomize
 	cd autoscaler-agent && $(KUSTOMIZE) edit set image autoscaler-agent=autoscaler-agent:dev
 
 .PHONY: deploy
-deploy: check-local-context docker-build load-images render-manifests kubectl deploy-fluent-bit ## Deploy controller to the K8s cluster specified in ~/.kube/config.
+deploy: check-local-context docker-build load-images render-manifests kubectl deploy-fluent-bit deploy-container-image-csi-driver ## Deploy controller to the K8s cluster specified in ~/.kube/config.
 	$(KUBECTL) apply -f $(RENDERED)/multus-dev.yaml
 	$(KUBECTL) -n kube-system rollout status daemonset kube-multus-ds
 	$(KUBECTL) apply -f $(RENDERED)/whereabouts.yaml
@@ -639,6 +639,13 @@ restart-fluent-bit: kubectl
 .PHONY: status-fluent-bit
 status-fluent-bit: kubectl
 	$(KUBECTL) -n kube-system rollout status daemonset fluent-bit
+
+##@ Container Image CSI Driver
+
+.PHONY: deploy-container-image-csi-driver
+deploy-container-image-csi-driver: kubectl
+	$(KUBECTL) apply -f container-image-csi-driver.yaml
+	$(KUBECTL) -n kube-system rollout status daemonset container-image-csi-driver
 
 ##@ Build Dependencies
 

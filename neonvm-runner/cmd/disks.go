@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	rootDiskPath    = "/vm/images/rootdisk.qcow2"
+	rootDiskPath    = "/vm/images/disk.qcow2"
 	runtimeDiskPath = "/vm/images/runtime.iso"
 	mountedDiskPath = "/vm/images"
 
@@ -94,6 +94,12 @@ func resizeRootDisk(logger *zap.Logger, vmSpec *vmv1.VirtualMachineSpec) error {
 	// resize rootDisk image of size specified and new size more than current
 	type QemuImgOutputPartial struct {
 		VirtualSize int64 `json:"virtual-size"`
+	}
+	// chown rootDisk to qemu user and group
+	chownOutput, err := exec.Command("chown", "36:34", rootDiskPath).Output()
+	if err != nil {
+		logger.Error("failed to chown rootDisk", zap.Error(err), zap.String("output", string(chownOutput)))
+		return fmt.Errorf("failed to chown rootDisk: %w", err)
 	}
 	// get current disk size by qemu-img info command
 	qemuImgOut, err := exec.Command(qemuImgBin, "info", "--output=json", rootDiskPath).Output()
