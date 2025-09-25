@@ -195,9 +195,9 @@ jobs:
           kubectl apply -f $(rendered neonvm-vxlan-controller.yaml)
           kubectl -n neonvm-system rollout status daemonset neonvm-vxlan-controller
           kubectl apply -f $(rendered autoscale-scheduler.yaml)
-          kubectl -n kube-system rollout status deployment autoscale-scheduler
+          kubectl -n neonvm-system rollout status deployment autoscale-scheduler
           kubectl apply -f $(rendered autoscaler-agent.yaml)
-          kubectl -n kube-system rollout status daemonset autoscaler-agent
+          kubectl -n neonvm-system rollout status daemonset autoscaler-agent
 
       - name: load e2e test vm image
         env:
