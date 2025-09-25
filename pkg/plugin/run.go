@@ -225,8 +225,7 @@ func (s *PluginState) handleAgentRequest(
 		return nil, 404, errors.New("pod not found")
 	}
 
-	// FIXME: make the timeout configurable.
-	updateTimeout := time.NewTimer(time.Second)
+	updateTimeout := time.NewTimer(time.Second * time.Duration(s.config.UpdateTimeoutSeconds))
 	defer updateTimeout.Stop()
 
 	for {
