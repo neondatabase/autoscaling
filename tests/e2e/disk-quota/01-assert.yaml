@@ -15,7 +15,7 @@ commands:
 
       # Define the expected values for Project and BlockHardLimit
       expected_project="#0"
-      expected_block_hard_limit="1048576" # 1 GiB
+      expected_block_hard_limit="3145728" # 3 GiB
 
       # Assert the Project and BlockHardLimit values
       [ "$project" = "$expected_project" ]
