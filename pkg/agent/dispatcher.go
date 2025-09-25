@@ -156,9 +156,8 @@ func NewDispatcher(
 		disp.run(c, l, sendUpscaleRequested)
 	})
 	runner.spawnBackgroundWorker(ctx, logger.Named("health-checks"), "vm-monitor health checks", func(ctx context.Context, logger *zap.Logger) {
-		timeout := time.Second * time.Duration(runner.global.config.Monitor.ResponseTimeoutSeconds)
-		// FIXME: make this duration configurable
-		ticker := time.NewTicker(5 * time.Second)
+		timeout := runner.global.config.Monitor.ResponseTimeout.ToDuration()
+		ticker := time.NewTicker(runner.global.config.Monitor.HealthCheckInterval.ToDuration())
 		defer ticker.Stop()
 
 		// if we've had sequential failures for more than

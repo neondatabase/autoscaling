@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/tychoish/fun/erc"
 
@@ -11,10 +12,11 @@ import (
 	"github.com/neondatabase/autoscaling/pkg/agent/scalingevents"
 	"github.com/neondatabase/autoscaling/pkg/api"
 	"github.com/neondatabase/autoscaling/pkg/reporting"
+	"github.com/neondatabase/autoscaling/pkg/util/duration"
 )
 
 type Config struct {
-	RefreshStateIntervalSeconds uint `json:"refereshStateIntervalSeconds"`
+	RefreshStateInterval duration.Duration `json:"refreshStateInterval"`
 
 	Billing       billing.Config       `json:"billing"`
 	ScalingEvents scalingevents.Config `json:"scalingEvents"`
@@ -25,6 +27,9 @@ type Config struct {
 	Monitor   MonitorConfig    `json:"monitor"`
 	NeonVM    NeonVMConfig     `json:"neonvm"`
 	DumpState *DumpStateConfig `json:"dumpState"`
+	
+	DeadlockCheckerDelay duration.Duration `json:"deadlockCheckerDelay"`
+	DeadlockCheckerTimeout duration.Duration `json:"deadlockCheckerTimeout"`
 }
 
 type RateThresholdConfig struct {
@@ -33,47 +38,38 @@ type RateThresholdConfig struct {
 }
 
 type MonitorConfig struct {
-	ResponseTimeoutSeconds uint `json:"responseTimeoutSeconds"`
-	// ConnectionTimeoutSeconds gives how long we may take to connect to the
+	ResponseTimeout duration.Duration `json:"responseTimeout"`
 	// monitor before cancelling.
-	ConnectionTimeoutSeconds uint `json:"connectionTimeoutSeconds"`
-	// ConnectionRetryMinWaitSeconds gives the minimum amount of time we must wait between attempts
+	ConnectionTimeout duration.Duration `json:"connectionTimeout"`
 	// to connect to the vm-monitor, regardless of whether they're successful.
-	ConnectionRetryMinWaitSeconds uint `json:"connectionRetryMinWaitSeconds"`
+	ConnectionRetryMinWait duration.Duration `json:"connectionRetryMinWait"`
 	// ServerPort is the port that the dispatcher serves from
 	ServerPort uint16 `json:"serverPort"`
-	// UnhealthyAfterSilenceDurationSeconds gives the duration, in seconds, after which failing to
 	// receive a successful request from the monitor indicates that it is probably unhealthy.
-	UnhealthyAfterSilenceDurationSeconds uint `json:"unhealthyAfterSilenceDurationSeconds"`
-	// UnhealthyStartupGracePeriodSeconds gives the duration, in seconds, after which we will no
-	// longer excuse total VM monitor failures - i.e. when unhealthyAfterSilenceDurationSeconds
+	UnhealthyAfterSilenceDuration duration.Duration `json:"unhealthyAfterSilenceDuration"`
 	// kicks in.
-	UnhealthyStartupGracePeriodSeconds uint `json:"unhealthyStartupGracePeriodSeconds"`
-	// MaxHealthCheckSequentialFailuresSeconds gives the duration, in seconds, after which we
+	UnhealthyStartupGracePeriod duration.Duration `json:"unhealthyStartupGracePeriod"`
 	// should restart the connection to the vm-monitor if health checks aren't succeeding.
-	MaxHealthCheckSequentialFailuresSeconds uint `json:"maxHealthCheckSequentialFailuresSeconds"`
+	MaxHealthCheckSequentialFailures duration.Duration `json:"maxHealthCheckSequentialFailures"`
 	// MaxFailedRequestRate defines the maximum rate of failed monitor requests, above which
 	// a VM is considered stuck.
 	MaxFailedRequestRate RateThresholdConfig `json:"maxFailedRequestRate"`
 
-	// RetryFailedRequestSeconds gives the duration, in seconds, that we must wait before retrying a
 	// request that previously failed.
-	RetryFailedRequestSeconds uint `json:"retryFailedRequestSeconds"`
-	// RetryDeniedDownscaleSeconds gives the duration, in seconds, that we must wait before retrying
+	RetryFailedRequest duration.Duration `json:"retryFailedRequest"`
 	// a downscale request that was previously denied
-	RetryDeniedDownscaleSeconds uint `json:"retryDeniedDownscaleSeconds"`
-	// RequestedUpscaleValidSeconds gives the duration, in seconds, that requested upscaling should
+	RetryDeniedDownscale duration.Duration `json:"retryDeniedDownscale"`
 	// be respected for, before allowing re-downscaling.
-	RequestedUpscaleValidSeconds uint `json:"requestedUpscaleValidSeconds"`
+	RequestedUpscaleValid duration.Duration `json:"requestedUpscaleValid"`
+	HealthCheckInterval duration.Duration `json:"healthCheckInterval"`
 }
 
 // DumpStateConfig configures the endpoint to dump all internal state
 type DumpStateConfig struct {
 	// Port is the port to serve on
 	Port uint16 `json:"port"`
-	// TimeoutSeconds gives the maximum duration, in seconds, that we allow for a request to dump
 	// internal state.
-	TimeoutSeconds uint `json:"timeoutSeconds"`
+	Timeout duration.Duration `json:"timeout"`
 }
 
 // ScalingConfig defines the scheduling we use for scaling up and down
@@ -97,10 +93,8 @@ type MetricsSourceConfig struct {
 	//
 	// For system metrics, vm-builder installs vector (from vector.dev) to expose them on port 9100.
 	Port uint16 `json:"port"`
-	// RequestTimeoutSeconds gives the timeout duration, in seconds, for metrics requests
-	RequestTimeoutSeconds uint `json:"requestTimeoutSeconds"`
-	// SecondsBetweenRequests sets the number of seconds to wait between metrics requests
-	SecondsBetweenRequests uint `json:"secondsBetweenRequests"`
+	RequestTimeout duration.Duration `json:"requestTimeout"`
+	RequestInterval duration.Duration `json:"requestInterval"`
 }
 
 // SchedulerConfig defines a few parameters for scheduler requests
@@ -109,33 +103,29 @@ type SchedulerConfig struct {
 	//
 	// Any VMs that don't have a matching Spec.SchedulerName will not be autoscaled.
 	SchedulerName string `json:"schedulerName"`
-	// RequestTimeoutSeconds gives the timeout duration, in seconds, for requests to the scheduler
 	//
 	// If zero, requests will have no timeout.
-	RequestTimeoutSeconds uint `json:"requestTimeoutSeconds"`
-	// RequestAtLeastEverySeconds gives the maximum duration we should go without attempting a
+	RequestTimeout duration.Duration `json:"requestTimeout"`
 	// request to the scheduler, even if nothing's changed.
-	RequestAtLeastEverySeconds uint `json:"requestAtLeastEverySeconds"`
-	// RetryFailedRequestSeconds gives the duration, in seconds, that we must wait after a previous
+	RequestAtLeastEvery duration.Duration `json:"requestAtLeastEvery"`
 	// failed request before making another one.
-	RetryFailedRequestSeconds uint `json:"retryFailedRequestSeconds"`
-	// RetryDeniedUpscaleSeconds gives the duration, in seconds, that we must wait before resending
+	RetryFailedRequest duration.Duration `json:"retryFailedRequest"`
 	// a request for resources that were not approved
-	RetryDeniedUpscaleSeconds uint `json:"retryDeniedUpscaleSeconds"`
+	RetryDeniedUpscale duration.Duration `json:"retryDeniedUpscale"`
 	// RequestPort defines the port to access the scheduler's ✨special✨ API with
 	RequestPort uint16 `json:"requestPort"`
 	// MaxFailedRequestRate defines the maximum rate of failed scheduler requests, above which
 	// a VM is considered stuck.
 	MaxFailedRequestRate RateThresholdConfig `json:"maxFailedRequestRate"`
+	RetryWatchIntervals duration.RandomDuration `json:"retryWatchIntervals"`
+	RetryRelistIntervals duration.RandomDuration `json:"retryRelistIntervals"`
 }
 
 // NeonVMConfig defines a few parameters for NeonVM requests
 type NeonVMConfig struct {
-	// RequestTimeoutSeconds gives the timeout duration, in seconds, for VM patch requests
-	RequestTimeoutSeconds uint `json:"requestTimeoutSeconds"`
-	// RetryFailedRequestSeconds gives the duration, in seconds, that we must wait after a previous
+	RequestTimeout duration.Duration `json:"requestTimeout"`
 	// failed request before making another one.
-	RetryFailedRequestSeconds uint `json:"retryFailedRequestSeconds"`
+	RetryFailedRequest duration.Duration `json:"retryFailedRequest"`
 
 	// MaxFailedRequestRate defines the maximum rate of failed NeonVM requests, above which
 	// a VM is considered stuck.
@@ -217,40 +207,50 @@ func (c *Config) validate() error {
 	}
 
 	erc.Whenf(ec, c.DumpState != nil && c.DumpState.Port == 0, zeroTmpl, ".dumpState.port")
-	erc.Whenf(ec, c.DumpState != nil && c.DumpState.TimeoutSeconds == 0, zeroTmpl, ".dumpState.timeoutSeconds")
+	erc.Whenf(ec, c.DumpState != nil && c.DumpState.Timeout.Seconds == 0, zeroTmpl, ".dumpState.timeout.seconds")
 
 	validateMetricsConfig := func(cfg MetricsSourceConfig, key string) {
 		erc.Whenf(ec, cfg.Port == 0, zeroTmpl, fmt.Sprintf(".metrics.%s.port", key))
-		erc.Whenf(ec, cfg.RequestTimeoutSeconds == 0, zeroTmpl, fmt.Sprintf(".metrics.%s.requestTimeoutSeconds", key))
-		erc.Whenf(ec, cfg.SecondsBetweenRequests == 0, zeroTmpl, fmt.Sprintf(".metrics.%s.secondsBetweenRequests", key))
+		erc.Whenf(ec, cfg.RequestTimeout.Seconds == 0, zeroTmpl, fmt.Sprintf(".metrics.%s.requestTimeout.seconds", key))
+		erc.Whenf(ec, cfg.RequestInterval.Seconds == 0, zeroTmpl, fmt.Sprintf(".metrics.%s.requestInterval.seconds", key))
 	}
 	validateMetricsConfig(c.Metrics.System, "system")
 	validateMetricsConfig(c.Metrics.LFC, "lfc")
 	erc.Whenf(ec, c.Scaling.ComputeUnit.VCPU == 0, zeroTmpl, ".scaling.computeUnit.vCPUs")
 	erc.Whenf(ec, c.Scaling.ComputeUnit.Mem == 0, zeroTmpl, ".scaling.computeUnit.mem")
-	erc.Whenf(ec, c.NeonVM.RequestTimeoutSeconds == 0, zeroTmpl, ".scaling.requestTimeoutSeconds")
-	erc.Whenf(ec, c.NeonVM.RetryFailedRequestSeconds == 0, zeroTmpl, ".scaling.retryFailedRequestSeconds")
+	erc.Whenf(ec, c.NeonVM.RequestTimeout.Seconds == 0, zeroTmpl, ".neonvm.requestTimeout.seconds")
+	erc.Whenf(ec, c.NeonVM.RetryFailedRequest.Seconds == 0, zeroTmpl, ".neonvm.retryFailedRequest.seconds")
 	erc.Whenf(ec, c.NeonVM.MaxFailedRequestRate.IntervalSeconds == 0, zeroTmpl, ".neonvm.maxFailedRequestRate.intervalSeconds")
-	erc.Whenf(ec, c.Monitor.ResponseTimeoutSeconds == 0, zeroTmpl, ".monitor.responseTimeoutSeconds")
-	erc.Whenf(ec, c.Monitor.ConnectionTimeoutSeconds == 0, zeroTmpl, ".monitor.connectionTimeoutSeconds")
-	erc.Whenf(ec, c.Monitor.ConnectionRetryMinWaitSeconds == 0, zeroTmpl, ".monitor.connectionRetryMinWaitSeconds")
+	erc.Whenf(ec, c.Monitor.ResponseTimeout.Seconds == 0, zeroTmpl, ".monitor.responseTimeout.seconds")
+	erc.Whenf(ec, c.Monitor.ConnectionTimeout.Seconds == 0, zeroTmpl, ".monitor.connectionTimeout.seconds")
+	erc.Whenf(ec, c.Monitor.ConnectionRetryMinWait.Seconds == 0, zeroTmpl, ".monitor.connectionRetryMinWait.seconds")
 	erc.Whenf(ec, c.Monitor.ServerPort == 0, zeroTmpl, ".monitor.serverPort")
-	erc.Whenf(ec, c.Monitor.UnhealthyAfterSilenceDurationSeconds == 0, zeroTmpl, ".monitor.unhealthyAfterSilenceDurationSeconds")
-	erc.Whenf(ec, c.Monitor.UnhealthyStartupGracePeriodSeconds == 0, zeroTmpl, ".monitor.unhealthyStartupGracePeriodSeconds")
-	erc.Whenf(ec, c.Monitor.MaxHealthCheckSequentialFailuresSeconds == 0, zeroTmpl, ".monitor.maxHealthCheckSequentialFailuresSeconds")
-	erc.Whenf(ec, c.Monitor.RetryFailedRequestSeconds == 0, zeroTmpl, ".monitor.retryFailedRequestSeconds")
-	erc.Whenf(ec, c.Monitor.RetryDeniedDownscaleSeconds == 0, zeroTmpl, ".monitor.retryDeniedDownscaleSeconds")
-	erc.Whenf(ec, c.Monitor.RequestedUpscaleValidSeconds == 0, zeroTmpl, ".monitor.requestedUpscaleValidSeconds")
+	erc.Whenf(ec, c.Monitor.UnhealthyAfterSilenceDuration.Seconds == 0, zeroTmpl, ".monitor.unhealthyAfterSilenceDuration.seconds")
+	erc.Whenf(ec, c.Monitor.UnhealthyStartupGracePeriod.Seconds == 0, zeroTmpl, ".monitor.unhealthyStartupGracePeriod.seconds")
+	erc.Whenf(ec, c.Monitor.MaxHealthCheckSequentialFailures.Seconds == 0, zeroTmpl, ".monitor.maxHealthCheckSequentialFailures.seconds")
+	erc.Whenf(ec, c.Monitor.RetryFailedRequest.Seconds == 0, zeroTmpl, ".monitor.retryFailedRequest.seconds")
+	erc.Whenf(ec, c.Monitor.RetryDeniedDownscale.Seconds == 0, zeroTmpl, ".monitor.retryDeniedDownscale.seconds")
+	erc.Whenf(ec, c.Monitor.RequestedUpscaleValid.Seconds == 0, zeroTmpl, ".monitor.requestedUpscaleValid.seconds")
+	erc.Whenf(ec, c.Monitor.HealthCheckInterval.Seconds == 0, zeroTmpl, ".monitor.healthCheckInterval.seconds")
 	erc.Whenf(ec, c.Monitor.MaxFailedRequestRate.IntervalSeconds == 0, zeroTmpl, ".monitor.maxFailedRequestRate.intervalSeconds")
 	// add all errors if there are any: https://github.com/neondatabase/autoscaling/pull/195#discussion_r1170893494
 	ec.Add(c.Scaling.DefaultConfig.ValidateDefaults())
 	erc.Whenf(ec, c.Scheduler.RequestPort == 0, zeroTmpl, ".scheduler.requestPort")
-	erc.Whenf(ec, c.Scheduler.RequestTimeoutSeconds == 0, zeroTmpl, ".scheduler.requestTimeoutSeconds")
-	erc.Whenf(ec, c.Scheduler.RequestAtLeastEverySeconds == 0, zeroTmpl, ".scheduler.requestAtLeastEverySeconds")
-	erc.Whenf(ec, c.Scheduler.RetryFailedRequestSeconds == 0, zeroTmpl, ".scheduler.retryFailedRequestSeconds")
-	erc.Whenf(ec, c.Scheduler.RetryDeniedUpscaleSeconds == 0, zeroTmpl, ".scheduler.retryDeniedUpscaleSeconds")
+	erc.Whenf(ec, c.Scheduler.RequestTimeout.Seconds == 0, zeroTmpl, ".scheduler.requestTimeout.seconds")
+	erc.Whenf(ec, c.Scheduler.RequestAtLeastEvery.Seconds == 0, zeroTmpl, ".scheduler.requestAtLeastEvery.seconds")
+	erc.Whenf(ec, c.Scheduler.RetryFailedRequest.Seconds == 0, zeroTmpl, ".scheduler.retryFailedRequest.seconds")
+	erc.Whenf(ec, c.Scheduler.RetryDeniedUpscale.Seconds == 0, zeroTmpl, ".scheduler.retryDeniedUpscale.seconds")
+	if err := c.Scheduler.RetryWatchIntervals.Validate(); err != nil {
+		ec.Add(fmt.Errorf(".scheduler.retryWatchIntervals: %w", err))
+	}
+	if err := c.Scheduler.RetryRelistIntervals.Validate(); err != nil {
+		ec.Add(fmt.Errorf(".scheduler.retryRelistIntervals: %w", err))
+	}
 	erc.Whenf(ec, c.Scheduler.SchedulerName == "", emptyTmpl, ".scheduler.schedulerName")
 	erc.Whenf(ec, c.Scheduler.MaxFailedRequestRate.IntervalSeconds == 0, zeroTmpl, ".monitor.maxFailedRequestRate.intervalSeconds")
+	erc.Whenf(ec, c.RefreshStateInterval.Seconds == 0, zeroTmpl, ".refreshStateInterval.seconds")
+	erc.Whenf(ec, c.DeadlockCheckerDelay.Seconds == 0, zeroTmpl, ".deadlockCheckerDelay.seconds")
+	erc.Whenf(ec, c.DeadlockCheckerTimeout.Seconds == 0, zeroTmpl, ".deadlockCheckerTimeout.seconds")
 
 	return ec.Resolve()
 }
