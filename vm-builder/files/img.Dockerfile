@@ -125,6 +125,8 @@ RUN set -e \
     && mkdir -p /rootdisk/etc/ssh \
     && mkdir -p /rootdisk/var/empty \
     && cp -f /rootdisk/neonvm/bin/inittab /rootdisk/etc/inittab \
+    && echo "127.0.0.1 localhost" >> /rootdisk/etc/hosts \
+    && echo "::1 localhost" >> /rootdisk/etc/hosts \
     && mkfs.ext4 -L vmroot -d /rootdisk /disk.raw ${VM_BUILDER_DISK_SIZE} \
     && qemu-img convert -f raw -O qcow2 -o cluster_size=2M,lazy_refcounts=on /disk.raw /disk.qcow2
 
