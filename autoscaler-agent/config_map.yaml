@@ -55,12 +55,14 @@ data:
         "system": {
           "port": 9100,
           "requestTimeoutSeconds": 2,
-          "secondsBetweenRequests": 5
+          "secondsBetweenRequests": 5,
+          "firstRequestWithinSeconds": 5
         },
         "lfc": {
           "port": 9499,
           "requestTimeoutSeconds": 5,
-          "secondsBetweenRequests": 15
+          "secondsBetweenRequests": 60,
+          "firstRequestWithinSeconds": 15
         }
       },
       "scheduler": {
