@@ -32,7 +32,7 @@ This isn't the only architecture document. You may also want to look at:
 * [`neondatabase/neon/.../vm_monitor`] (a different repo) — where the vm-monitor, an autoscaling
   component running _inside_ each VM lives.
 
-[`neondatabase/neon/.../vm_monitor`]: https://github.com/neondatabase/neon/tree/main/libs/vm_monitor
+[`neondatabase/neon/.../vm_monitor`]: https://github.com/neondatabase/neon/tree/main/compute_tools/vm_monitor
 
 ## High-level overview
 

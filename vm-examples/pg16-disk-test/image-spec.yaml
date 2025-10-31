@@ -54,11 +54,11 @@ build: |
   ADD "https://api.github.com/repos/neondatabase/neon/commits/$BRANCH" latest_commit
 
   RUN git clone --depth 1 --branch $BRANCH https://github.com/neondatabase/neon.git
-  RUN cargo build --release --manifest-path neon/libs/vm_monitor/Cargo.toml
+  RUN cargo build --release --manifest-path neon/compute_tools/vm_monitor/Cargo.toml
   # Move binary so we can cargo clean
   RUN mkdir -p /workspace/bin && cp /workspace/neon/target/release/vm-monitor /workspace/bin
   # Cargo clean dramatically reduces the size of the image
-  RUN cargo clean --release --manifest-path neon/libs/vm_monitor/Cargo.toml
+  RUN cargo clean --release --manifest-path neon/compute_tools/vm_monitor/Cargo.toml
 
   # Build the allocation tester:
   FROM alpine:$ALPINE_IMG_TAG$ALPINE_IMG_SHA AS allocate-loop-builder
