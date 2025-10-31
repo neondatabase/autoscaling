@@ -152,6 +152,8 @@ on each node, the scheduler can reject a scale up request to avoid having undesi
    memory slots. The permit will exactly equal the resources in the `AgentRequest`.
 4. The `autoscaler-agent` repeatedly fetches metrics from the VM. For each:
     1. Calculate the new desired resource allocation, as a multiple of compute units.
+       With the new ScaleRequest protocol message, the vm-monitor can specify it directly.
+       With older vm-monitor versions, the agent calculates it based on the VM metrics.
     2. If reaching the desired resource allocation requires scaling any resources _down_, submit a VM patch
        request that scales those resources down, but keeps the rest the same.
        * Note: this requires submitting a Kubernetes patch request. This goes through the NeonVM

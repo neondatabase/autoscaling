@@ -310,6 +310,9 @@ func (r *Runner) Run(ctx context.Context, logger *zap.Logger, vmInfoUpdated util
 			reset: func(withLock func()) {
 				ecwc.Updater().ResetMonitor(withLock)
 			},
+			scaleRequested: func(request api.Allocation, withLock func()) {
+				ecwc.Updater().ScaleRequested(request, withLock)
+			},
 			upscaleRequested: func(request api.MoreResources, withLock func()) {
 				ecwc.Updater().UpscaleRequested(request, withLock)
 			},
@@ -563,6 +566,7 @@ type monitorInfo struct {
 
 type monitorStateCallbacks struct {
 	reset            func(withLock func())
+	scaleRequested   func(request api.Allocation, withLock func())
 	upscaleRequested func(request api.MoreResources, withLock func())
 	setActive        func(active bool, withLock func())
 }
@@ -648,7 +652,10 @@ func (r *Runner) connectToMonitorLoop(
 		}
 
 		lastStart = time.Now()
-		dispatcher, err := NewDispatcher(ctx, logger, addr, r, callbacks.upscaleRequested)
+		dispatcher, err := NewDispatcher(ctx, logger, addr, r,
+			callbacks.scaleRequested,
+			callbacks.upscaleRequested,
+		)
 		if err != nil {
 			logger.Error("Failed to connect to vm-monitor", zap.String("addr", addr), zap.Error(err))
 			continue
